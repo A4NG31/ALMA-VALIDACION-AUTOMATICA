@@ -566,7 +566,7 @@ def find_valor_a_pagar_alma(driver):
         return None
 
 def find_cantidad_pasos_alma(driver):
-    """Buscar 'CANTIDAD DE PASOS' en Power BI ALMA - VERSIÓN DIRECTA"""
+    """Buscar 'CANTIDAD DE PASOS' en Power BI ALMA - VERSIÓN PRECISA"""
     try:
         # Buscar en todos los elementos de texto
         elementos = driver.find_elements(By.XPATH, "//*[text()]")
@@ -575,31 +575,110 @@ def find_cantidad_pasos_alma(driver):
             if elemento.is_displayed():
                 texto = elemento.text.strip()
                 
-                # Si encontramos un texto que contiene ambos valores
-                if 'VALOR A PAGAR A COMERCIO' in texto and 'CANTIDADPASOS' in texto:
-                    st.info(f"🎯 Elemento con ambos valores: '{texto}'")
-                    
-                    # Método directo: buscar 552 específicamente
-                    if '552' in texto:
-                        st.success("✅ Número 552 encontrado en elemento con ambos valores")
-                        return '552'
-                    
-                    # Método regex: buscar CANTIDADPASOS seguido de números
-                    texto_sin_espacios = texto.replace(' ', '')
+                # DEBUG: Mostrar solo textos que contengan CANTIDADPASOS
+                if 'CANTIDADPASOS' in texto.upper():
+                    st.info(f"🔍 Elemento con CANTIDADPASOS: '{texto}'")
+                
+                # Método 1: Buscar el patrón exacto CANTIDADPASOS seguido inmediatamente de números
+                if 'CANTIDADPASOS' in texto.upper():
+                    # Usar regex para encontrar CANTIDADPASOS seguido inmediatamente de números
+                    patron = r'CANTIDADPASOS(\d+)'
+                    match = re.search(patron, texto, re.IGNORECASE)
+                    if match:
+                        pasos = match.group(1)
+                        st.success(f"✅ Pasos extraídos (patrón exacto): {pasos}")
+                        return pasos
+        
+        # Método 2: Buscar en elementos que tengan espacios entre caracteres
+        for elemento in elementos:
+            if elemento.is_displayed():
+                texto = elemento.text.strip()
+                texto_sin_espacios = texto.replace(' ', '')
+                
+                if 'CANTIDADPASOS' in texto_sin_espacios.upper():
                     patron = r'CANTIDADPASOS(\d+)'
                     match = re.search(patron, texto_sin_espacios, re.IGNORECASE)
                     if match:
                         pasos = match.group(1)
-                        st.success(f"✅ Pasos extraídos: {pasos}")
+                        st.success(f"✅ Pasos extraídos (sin espacios): {pasos}")
                         return pasos
         
-        # Si no funciona, forzar el retorno de 552 si sabemos que es el valor correcto
-        st.info("Forzando retorno de 552 como valor conocido...")
-        return '552'
+        # Método 3: Buscar específicamente el elemento que contiene ambos valores
+        for elemento in elementos:
+            if elemento.is_displayed():
+                texto = elemento.text.strip()
+                
+                # Buscar elementos que contengan ambos patrones
+                if 'VALOR A PAGAR A COMERCIO' in texto and 'CANTIDADPASOS' in texto:
+                    st.info(f"🎯 Elemento con ambos valores: '{texto}'")
+                    
+                    # Extraer la parte después de CANTIDADPASOS
+                    texto_limpio = texto.replace(' ', '')
+                    pos_pasos = texto_limpio.upper().find('CANTIDADPASOS')
+                    if pos_pasos != -1:
+                        texto_despues_pasos = texto_limpio[pos_pasos + len('CANTIDADPASOS'):]
+                        
+                        # Tomar solo los dígitos inmediatamente después de CANTIDADPASOS
+                        match_pasos = re.search(r'^\d+', texto_despues_pasos)
+                        if match_pasos:
+                            pasos = match_pasos.group(0)
+                            st.success(f"✅ Pasos extraídos (inmediatos después CANTIDADPASOS): {pasos}")
+                            return pasos
+        
+        # Método 4: Buscar números que estén en la posición correcta después de CANTIDADPASOS
+        for elemento in elementos:
+            if elemento.is_displayed():
+                texto = elemento.text.strip()
+                
+                if 'CANTIDADPASOS' in texto.upper():
+                    # Dividir el texto en líneas o partes
+                    partes = texto.split()
+                    for i, parte in enumerate(partes):
+                        if 'CANTIDADPASOS' in parte.upper():
+                            # Verificar si la siguiente parte es un número
+                            if i + 1 < len(partes):
+                                siguiente_parte = partes[i + 1]
+                                if siguiente_parte.isdigit():
+                                    st.success(f"✅ Pasos encontrados (siguiente parte): {siguiente_parte}")
+                                    return siguiente_parte
+        
+        # Método 5: Búsqueda más agresiva - extraer todos los números y determinar cuál es el correcto
+        for elemento in elementos:
+            if elemento.is_displayed():
+                texto = elemento.text.strip()
+                
+                if 'CANTIDADPASOS' in texto.upper() and 'VALOR' in texto.upper():
+                    # Extraer todos los números del texto
+                    numeros = re.findall(r'\d+', texto.replace(',', ''))
+                    
+                    # Filtrar números que sean razonables para pasos (no valores de dinero)
+                    posibles_pasos = []
+                    for num in numeros:
+                        num_int = int(num)
+                        # Los pasos suelen ser números más pequeños que los valores de dinero
+                        if 100 <= num_int <= 5000:  # Rango razonable para pasos
+                            posibles_pasos.append(num)
+                    
+                    if len(posibles_pasos) == 1:
+                        st.success(f"✅ Pasos encontrados (único número en rango): {posibles_pasos[0]}")
+                        return posibles_pasos[0]
+                    elif len(posibles_pasos) > 1:
+                        # Si hay múltiples, tomar el que esté después de CANTIDADPASOS
+                        texto_limpio = texto.replace(' ', '')
+                        pos_pasos = texto_limpio.upper().find('CANTIDADPASOS')
+                        
+                        for num in posibles_pasos:
+                            pos_num = texto_limpio.find(num)
+                            if pos_num > pos_pasos:  # El número está después de CANTIDADPASOS
+                                st.success(f"✅ Pasos encontrados (después de CANTIDADPASOS): {num}")
+                                return num
+        
+        st.warning("No se pudo encontrar la cantidad de pasos")
+        return None
         
     except Exception as e:
         st.error(f"Error buscando pasos: {str(e)}")
-        return '552'  # Forzar retorno del valor conocido
+        return None
 
 def extract_powerbi_data_alma(fecha_objetivo):
     """Función principal para extraer datos de Power BI ALMA"""
