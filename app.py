@@ -504,85 +504,58 @@ def click_conciliacion_alma(driver, fecha_objetivo):
         return False
 
 def find_valor_a_pagar_alma(driver):
-    """Buscar 'VALOR A PAGAR A COMERCIO' en Power BI ALMA - VERSIÓN ORIGINAL QUE FUNCIONA"""
+    """Buscar 'VALOR A PAGAR A COMERCIO' en Power BI ALMA - VERSIÓN CORREGIDA"""
     try:
-        # Primero buscar el texto completo que contiene ambos valores
+        # Buscar en todos los elementos de texto
         elementos = driver.find_elements(By.XPATH, "//*[text()]")
+        
         for elemento in elementos:
             if elemento.is_displayed():
                 texto = elemento.text.strip()
-                # Buscar el patrón que contiene ambos valores
+                
+                # Buscar el patrón que contiene ambos valores juntos
                 if 'VALOR A PAGAR A COMERCIO' in texto and 'CANTIDADPASOS' in texto:
                     st.info(f"📝 Texto completo encontrado: '{texto}'")
                     
-                    # Extraer el valor numérico del pago
-                    match_valor = re.search(r'VALOR A PAGAR A COMERCIO\s*\$?([\d,]+)', texto)
-                    if match_valor:
-                        valor = match_valor.group(1)
-                        st.success(f"✅ Valor extraído: {valor}")
-                        return valor
+                    # Extraer el valor numérico usando regex - buscar número después de "VALOR A PAGAR A COMERCIO"
+                    # Patrón: busca cualquier número con comas después del texto del valor
+                    patron_valor = r'VALOR A PAGAR A COMERCIO[^\d]*([\d,]+)'
+                    match_valor = re.search(patron_valor, texto)
                     
-                    # Alternativa: buscar cualquier número grande después de VALOR A PAGAR
-                    match_valor_alt = re.search(r'VALOR A PAGAR A COMERCIO[^\d]*([\d,]+)', texto)
+                    if match_valor:
+                        valor_extraido = match_valor.group(1)
+                        st.success(f"✅ Valor extraído correctamente: {valor_extraido}")
+                        return valor_extraido
+                    
+                    # Si no funciona el primer patrón, intentar otro enfoque
+                    patron_valor_alt = r'VALOR A PAGAR A COMERCIO.*?(\d{1,3}(?:,\d{3})*)'
+                    match_valor_alt = re.search(patron_valor_alt, texto)
+                    
                     if match_valor_alt:
-                        valor = match_valor_alt.group(1)
-                        st.success(f"✅ Valor extraído (alternativo): {valor}")
-                        return valor
+                        valor_extraido = match_valor_alt.group(1)
+                        st.success(f"✅ Valor extraído (alternativo): {valor_extraido}")
+                        return valor_extraido
         
         # Si no se encuentra el texto combinado, buscar por separado
-        titulo_selectors = [
-            "//*[contains(text(), 'VALOR A PAGAR A COMERCIO')]",
-            "//*[contains(text(), 'Valor a pagar a comercio')]",
-            "//*[contains(text(), 'VALOR A PAGAR') and contains(text(), 'COMERCIO')]",
-        ]
+        st.warning("No se encontró el texto combinado, buscando por separado...")
         
-        titulo_element = None
-        for selector in titulo_selectors:
-            try:
-                elementos = driver.find_elements(By.XPATH, selector)
-                for elemento in elementos:
-                    if elemento.is_displayed():
-                        titulo_element = elemento
-                        break
-                if titulo_element:
-                    break
-            except:
-                continue
-        
-        if not titulo_element:
-            st.error("No se encontró 'VALOR A PAGAR A COMERCIO'")
-            return None
-        
-        # Buscar en el contenedor
-        try:
-            container = titulo_element.find_element(By.XPATH, "./..")
-            numeric_elements = container.find_elements(By.XPATH, ".//*")
-            
-            for elem in numeric_elements:
-                texto = elem.text.strip()
-                if texto and any(char.isdigit() for char in texto) and len(texto) < 50:
-                    if texto != titulo_element.text:
-                        # Extraer solo números
-                        match = re.search(r'([\d,]+)', texto)
-                        if match:
-                            return match.group(1)
-        except:
-            pass
-        
-        # Estrategia 2: elementos hermanos
-        try:
-            parent = titulo_element.find_element(By.XPATH, "./..")
-            siblings = parent.find_elements(By.XPATH, "./*")
-            
-            for sibling in siblings:
-                if sibling != titulo_element:
-                    texto = sibling.text.strip()
-                    if texto and any(char.isdigit() for char in texto):
-                        match = re.search(r'([\d,]+)', texto)
-                        if match:
-                            return match.group(1)
-        except:
-            pass
+        # Buscar elementos que contengan el valor numérico grande (probablemente el total)
+        elementos_numericos = driver.find_elements(By.XPATH, "//*[text()]")
+        for elemento in elementos_numericos:
+            if elemento.is_displayed():
+                texto = elemento.text.strip()
+                # Buscar números grandes con formato de moneda
+                if texto and re.match(r'^\$?[\d,]+$', texto.replace(' ', '')):
+                    # Verificar que sea un número razonable para un pago
+                    numero_limpio = texto.replace('$', '').replace(',', '').replace(' ', '')
+                    if numero_limpio.isdigit():
+                        valor_num = int(numero_limpio)
+                        if 1000000 <= valor_num <= 50000000:  # Rango razonable para pagos
+                            st.success(f"💰 Valor candidato encontrado: {texto}")
+                            # Extraer solo los números sin el símbolo $
+                            match = re.search(r'([\d,]+)', texto)
+                            if match:
+                                return match.group(1)
         
         st.error("No se pudo encontrar el valor numérico")
         return None
@@ -1043,9 +1016,9 @@ def main():
         4. **Comparación**: Compara VALOR A PAGAR A COMERCIO y CANTIDAD DE PASOS
         
         **Mejoras en esta versión:**
-        - ✅ Función de valores original que funciona
+        - ✅ Función de valores que funciona correctamente
         - ✅ Función de pasos mejorada que busca específicamente la tarjeta
-        - ✅ Múltiples estrategias de búsqueda para mayor robustez
+        - ✅ Extracción robusta de ambos valores del Power BI
         """)
 
 if __name__ == "__main__":
