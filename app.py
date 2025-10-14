@@ -357,132 +357,150 @@ def setup_driver():
 def click_conciliacion_alma(driver, fecha_objetivo):
     """Hacer clic en la conciliación ALMA específica por fecha formato YYYY-MM-DD"""
     try:
-        # Convertir fecha a diferentes formatos
+        # Convertir fecha a diferentes formatos que podrían aparecer en Power BI
         fecha_partes = fecha_objetivo.split('-')
         anio = fecha_partes[0]
         mes_num = fecha_partes[1]
         dia = fecha_partes[2]
         
-        # Mapeo de meses a texto
-        meses_texto = {
-            '01': 'ENERO', '02': 'FEBRERO', '03': 'MARZO', '04': 'ABRIL',
-            '05': 'MAYO', '06': 'JUNIO', '07': 'JULIO', '08': 'AGOSTO',
-            '09': 'SEPTIEMBRE', '10': 'OCTUBRE', '11': 'NOVIEMBRE', '12': 'DICIEMBRE'
-        }
-        mes_texto = meses_texto.get(mes_num, '')
-        
-        # Diferentes formatos de fecha que podrían aparecer en Power BI
-        fecha_formatos = [
-            # Formato 09 DE OCTUBRE DEL 2025
-            f"{dia} DE {mes_texto} DEL {anio}",
-            f"{int(dia)} DE {mes_texto} DEL {anio}",
-            # Formato 09/OCTUBRE/2025
-            f"{dia}/{mes_texto}/{anio}",
-            f"{int(dia)}/{mes_texto}/{anio}",
-            # Formato 09-10-2025
-            f"{dia}-{mes_num}-{anio}",
-            f"{int(dia)}-{mes_num}-{anio}",
-            # Formato 09/10/2025
-            f"{dia}/{mes_num}/{anio}",
-            f"{int(dia)}/{mes_num}/{anio}",
-            # Formato con año corto
-            f"{dia}/{mes_num}/{anio[2:]}",
-            f"{int(dia)}/{mes_num}/{anio[2:]}",
+        # Formato que viste en Power BI: "ConciliaciónALMAdel2025−10−0900:00al2025−10−0911:59"
+        # Nota: Los guiones pueden ser diferentes (unicode)
+        formatos_especificos = [
+            f"ConciliaciónALMAdel{anio}−{mes_num}−{dia}00:00al{anio}−{mes_num}−{dia}11:59",
+            f"Conciliación ALMA del {anio}-{mes_num}-{dia} 00:00 al {anio}-{mes_num}-{dia} 11:59",
+            f"CONCILIACIÓN ALMA DEL {anio}-{mes_num}-{dia} 00:00 AL {anio}-{mes_num}-{dia} 11:59",
+            f"ALMA {anio}-{mes_num}-{dia}",
+            f"ALMA {dia}/{mes_num}/{anio}",
+            f"Conciliación ALMA {anio}-{mes_num}-{dia}",
         ]
         
         elemento_conciliacion = None
         
-        # Primero buscar por "ALMA" y luego verificar la fecha
-        try:
-            # Buscar todos los elementos que contengan "ALMA"
-            elementos_alma = driver.find_elements(By.XPATH, "//*[contains(text(), 'ALMA')]")
-            
-            for elemento in elementos_alma:
-                if elemento.is_displayed():
-                    texto_elemento = elemento.text.upper()
-                    # Verificar si contiene alguna de las fechas formatos
-                    for formato in fecha_formatos:
-                        if formato in texto_elemento:
-                            elemento_conciliacion = elemento
-                            st.success(f"✅ Encontrada conciliación: {texto_elemento}")
-                            break
-                    if elemento_conciliacion:
-                        break
-        except Exception as e:
-            st.warning(f"Búsqueda por ALMA no exitosa: {e}")
-        
-        # Si no se encontró con ALMA, buscar por "CONCILIACIÓN"
-        if not elemento_conciliacion:
+        # Primero buscar por el formato específico que viste
+        for formato in formatos_especificos:
             try:
-                elementos_conciliacion = driver.find_elements(By.XPATH, "//*[contains(text(), 'CONCILIACIÓN') or contains(text(), 'Conciliación')]")
+                # Reemplazar guiones especiales por guiones normales para la búsqueda
+                formato_busqueda = formato.replace('−', '-')  # guión especial a normal
+                selector = f"//*[contains(text(), '{formato_busqueda}')]"
+                elementos = driver.find_elements(By.XPATH, selector)
                 
-                for elemento in elementos_conciliacion:
+                for elemento in elementos:
                     if elemento.is_displayed():
-                        texto_elemento = elemento.text.upper()
-                        # Verificar si contiene alguna de las fechas formatos
-                        for formato in fecha_formatos:
-                            if formato in texto_elemento:
-                                elemento_conciliacion = elemento
-                                st.success(f"✅ Encontrada conciliación: {texto_elemento}")
-                                break
-                        if elemento_conciliacion:
+                        elemento_conciliacion = elemento
+                        st.success(f"✅ Encontrada conciliación con formato específico: {elemento.text}")
+                        break
+                if elemento_conciliacion:
+                    break
+            except Exception as e:
+                continue
+        
+        # Si no se encuentra con formatos específicos, buscar por partes
+        if not elemento_conciliacion:
+            # Buscar elementos que contengan ALMA y la fecha
+            try:
+                elementos_alma = driver.find_elements(By.XPATH, "//*[contains(text(), 'ALMA') or contains(text(), 'Alma')]")
+                
+                for elemento in elementos_alma:
+                    if elemento.is_displayed():
+                        texto_elemento = elemento.text
+                        # Verificar si contiene la fecha en cualquier formato
+                        if (f"{anio}-{mes_num}-{dia}" in texto_elemento or 
+                            f"{anio}−{mes_num}−{dia}" in texto_elemento or
+                            f"{dia}/{mes_num}/{anio}" in texto_elemento):
+                            elemento_conciliacion = elemento
+                            st.success(f"✅ Encontrada conciliación por partes: {texto_elemento}")
                             break
             except Exception as e:
-                st.warning(f"Búsqueda por CONCILIACIÓN no exitosa: {e}")
+                st.warning(f"Búsqueda por partes no exitosa: {e}")
         
-        # Si aún no se encuentra, buscar cualquier elemento con la fecha
+        # Si aún no se encuentra, buscar cualquier elemento con la fecha completa
         if not elemento_conciliacion:
-            for formato in fecha_formatos:
+            patrones_fecha = [
+                f"{anio}-{mes_num}-{dia}",
+                f"{anio}−{mes_num}−{dia}",  # guión especial
+                f"{dia}/{mes_num}/{anio}",
+            ]
+            
+            for patron in patrones_fecha:
                 try:
-                    selector = f"//*[contains(text(), '{formato}')]"
+                    selector = f"//*[contains(text(), '{patron}')]"
                     elementos = driver.find_elements(By.XPATH, selector)
                     for elemento in elementos:
                         if elemento.is_displayed():
-                            elemento_conciliacion = elemento
-                            st.success(f"✅ Encontrado por fecha: {elemento.text}")
-                            break
+                            # Verificar que también contenga "ALMA" o "Conciliación"
+                            texto_elemento = elemento.text.upper()
+                            if 'ALMA' in texto_elemento or 'CONCILIACIÓN' in texto_elemento:
+                                elemento_conciliacion = elemento
+                                st.success(f"✅ Encontrada por fecha y ALMA: {elemento.text}")
+                                break
                     if elemento_conciliacion:
                         break
                 except:
                     continue
         
+        # Último intento: buscar cualquier elemento con ALMA
+        if not elemento_conciliacion:
+            try:
+                elementos_alma = driver.find_elements(By.XPATH, "//*[contains(text(), 'ALMA') or contains(text(), 'Alma')]")
+                for elemento in elementos_alma:
+                    if elemento.is_displayed() and elemento.is_enabled():
+                        elemento_conciliacion = elemento
+                        st.success(f"✅ Encontrado elemento ALMA: {elemento.text}")
+                        break
+            except:
+                pass
+        
         if elemento_conciliacion:
+            # Hacer scroll y clic
             driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", elemento_conciliacion)
             time.sleep(2)
             
-            # Intentar hacer clic de diferentes maneras
+            # Intentar diferentes métodos de clic
             try:
                 elemento_conciliacion.click()
-            except:
+                st.success("✅ Clic realizado con éxito")
+            except Exception as e:
                 try:
                     driver.execute_script("arguments[0].click();", elemento_conciliacion)
-                except:
-                    # Último intento con ActionChains
-                    from selenium.webdriver.common.action_chains import ActionChains
-                    actions = ActionChains(driver)
-                    actions.move_to_element(elemento_conciliacion).click().perform()
+                    st.success("✅ Clic realizado con JavaScript")
+                except Exception as e2:
+                    try:
+                        from selenium.webdriver.common.action_chains import ActionChains
+                        actions = ActionChains(driver)
+                        actions.move_to_element(elemento_conciliacion).click().perform()
+                        st.success("✅ Clic realizado con ActionChains")
+                    except Exception as e3:
+                        st.error(f"❌ No se pudo hacer clic: {e3}")
+                        return False
             
-            time.sleep(5)  # Esperar más tiempo para que cargue
+            time.sleep(5)  # Esperar a que cargue
             return True
         else:
-            # Mostrar qué elementos están disponibles para debug
-            st.error(f"No se encontró la conciliación para la fecha {fecha_objetivo}")
-            st.info("Elementos disponibles en la página:")
+            # Debug: mostrar qué elementos hay disponibles
+            st.error(f"❌ No se encontró la conciliación para la fecha {fecha_objetivo}")
+            st.info("🔍 Elementos disponibles en la página que contienen 'ALMA':")
             try:
-                elementos_visibles = driver.find_elements(By.XPATH, "//*[text()]")
-                textos_unicos = set()
-                for elem in elementos_visibles[:20]:  # Mostrar primeros 20 elementos
+                elementos_texto = driver.find_elements(By.XPATH, "//*[text()]")
+                textos_alma = []
+                for elem in elementos_texto:
                     if elem.is_displayed() and elem.text.strip():
-                        textos_unicos.add(elem.text.strip())
+                        texto = elem.text.strip()
+                        if 'ALMA' in texto.upper() or 'CONCILIACIÓN' in texto.upper():
+                            textos_alma.append(texto)
                 
-                for texto in list(textos_unicos)[:10]:  # Mostrar primeros 10 textos únicos
-                    st.write(f"- {texto}")
-            except:
-                pass
+                if textos_alma:
+                    for texto in textos_alma[:10]:  # Mostrar primeros 10
+                        st.write(f"• {texto}")
+                else:
+                    st.write("No se encontraron elementos con 'ALMA' o 'CONCILIACIÓN'")
+                    
+            except Exception as e:
+                st.write(f"Error al buscar elementos: {e}")
+            
             return False
             
     except Exception as e:
-        st.error(f"Error al hacer clic en conciliación: {str(e)}")
+        st.error(f"❌ Error al hacer clic en conciliación: {str(e)}")
         return False
 
 def find_valor_a_pagar_alma(driver):
