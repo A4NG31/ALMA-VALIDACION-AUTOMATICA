@@ -34,6 +34,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+from collections import Counter
 import time
 import re
 import tempfile
@@ -565,42 +566,112 @@ def find_valor_a_pagar_alma(driver):
         return None
 
 def find_cantidad_pasos_alma(driver):
-    """Buscar 'CANTIDAD DE PASOS' en Power BI ALMA - VERSIÓN CORREGIDA"""
+    """Buscar 'CANTIDAD DE PASOS' en Power BI ALMA - VERSIÓN MEJORADA"""
     try:
-        # Buscar en todos los elementos de texto
-        elementos = driver.find_elements(By.XPATH, "//*[text()]")
+        # Estrategia 1: Buscar en elementos de la esquina superior derecha
+        # Primero buscar elementos que estén en la parte superior de la página
+        elementos_superiores = driver.find_elements(By.XPATH, "//*[text()]")
         
-        for elemento in elementos:
+        for elemento in elementos_superiores:
             if elemento.is_displayed():
-                texto = elemento.text.strip()
-                
-                # Buscar el patrón que contiene CANTIDADPASOS seguido de números
-                if 'CANTIDADPASOS' in texto:
-                    st.info(f"📝 Texto de pasos encontrado: '{texto}'")
+                ubicacion = elemento.location
+                # Filtrar elementos que estén en la parte superior de la página (primeros 300px)
+                if ubicacion['y'] < 300:
+                    texto = elemento.text.strip()
                     
-                    # Extraer los números inmediatamente después de CANTIDADPASOS
-                    patron_pasos = r'CANTIDADPASOS(\d+)'
-                    match_pasos = re.search(patron_pasos, texto)
-                    
-                    if match_pasos:
-                        pasos_extraidos = match_pasos.group(1)
-                        st.success(f"✅ Pasos extraídos correctamente: {pasos_extraidos}")
-                        return pasos_extraidos
-                    
-                    # Si no funciona el primer patrón, buscar números cerca de CANTIDADPASOS
-                    patron_pasos_alt = r'CANTIDADPASOS[^\d]*(\d+)'
-                    match_pasos_alt = re.search(patron_pasos_alt, texto)
-                    
-                    if match_pasos_alt:
-                        pasos_extraidos = match_pasos_alt.group(1)
-                        st.success(f"✅ Pasos extraídos (alternativo): {pasos_extraidos}")
-                        return pasos_extraidos
+                    # Buscar "CANTIDAD PASOS" o variantes
+                    if any(palabra in texto.upper() for palabra in ['CANTIDAD PASOS', 'CANTIDADPASOS', 'CANTIDAD DE PASOS', 'TOTAL PASOS']):
+                        st.info(f"🔍 Encontrado título de pasos en posición superior: '{texto}'")
+                        
+                        # Buscar números en el mismo elemento o elementos cercanos
+                        # Extraer números del texto actual
+                        numeros = re.findall(r'\d+', texto)
+                        if numeros:
+                            # Tomar el primer número encontrado
+                            pasos = numeros[0]
+                            st.success(f"✅ Pasos extraídos del título: {pasos}")
+                            return pasos
+                        
+                        # Si no hay números en el título, buscar en elementos hermanos o hijos
+                        try:
+                            parent = elemento.find_element(By.XPATH, "./..")
+                            elementos_cercanos = parent.find_elements(By.XPATH, ".//*[text()]")
+                            
+                            for elem_cercano in elementos_cercanos:
+                                if elem_cercano != elemento:
+                                    texto_cercano = elem_cercano.text.strip()
+                                    if texto_cercano and texto_cercano.isdigit():
+                                        st.success(f"✅ Pasos encontrados cerca del título: {texto_cercano}")
+                                        return texto_cercano
+                        except:
+                            pass
         
-        # Si no se encuentra CANTIDADPASOS, buscar números que podrían ser pasos
-        st.warning("No se encontró CANTIDADPASOS, buscando números de pasos...")
+        # Estrategia 2: Buscar en tablas o cards específicas
+        selectors_tablas = [
+            "//*[contains(@class, 'card')]",
+            "//*[contains(@class, 'table')]",
+            "//*[contains(@class, 'visual')]",
+            "//*[contains(@class, 'pivotTable')]",
+        ]
         
+        for selector in selectors_tablas:
+            try:
+                elementos_tabla = driver.find_elements(By.XPATH, selector)
+                for elemento in elementos_tabla:
+                    if elemento.is_displayed():
+                        texto_tabla = elemento.text.strip()
+                        # Verificar si es una tabla que contiene información de pasos
+                        if 'CANTIDAD' in texto_tabla.upper() and 'PASOS' in texto_tabla.upper():
+                            st.info(f"📊 Tabla de pasos encontrada: '{texto_tabla}'")
+                            
+                            # Buscar números en la tabla
+                            lineas = texto_tabla.split('\n')
+                            for linea in lineas:
+                                # Buscar líneas que contengan números
+                                if any(c.isdigit() for c in linea) and not any(simbolo in linea for simbolo in ['$', '%']):
+                                    numeros = re.findall(r'\d+', linea)
+                                    if numeros:
+                                        # Tomar el número más probable (generalmente el más grande)
+                                        numeros_enteros = [int(n) for n in numeros]
+                                        if numeros_enteros:
+                                            pasos = str(max(numeros_enteros))
+                                            st.success(f"✅ Pasos extraídos de tabla: {pasos}")
+                                            return pasos
+            except:
+                continue
+        
+        # Estrategia 3: Buscar números en la esquina superior derecha específicamente
+        st.info("🔍 Buscando en esquina superior derecha...")
+        elementos_derecha = driver.find_elements(By.XPATH, "//*[text()]")
+        candidatos_derecha = []
+        
+        for elemento in elementos_derecha:
+            if elemento.is_displayed():
+                ubicacion = elemento.location
+                tamaño_ventana = driver.get_window_size()
+                # Filtrar elementos en el 25% derecho de la pantalla y en la parte superior
+                if (ubicacion['x'] > tamaño_ventana['width'] * 0.6 and 
+                    ubicacion['y'] < tamaño_ventana['height'] * 0.3):
+                    
+                    texto = elemento.text.strip()
+                    # Buscar números que podrían ser pasos
+                    if texto and texto.isdigit():
+                        num = int(texto)
+                        # Rango razonable para pasos
+                        if 100 <= num <= 2000:
+                            candidatos_derecha.append((num, texto, ubicacion['y']))
+        
+        # Si hay candidatos en la derecha, tomar el que esté más arriba
+        if candidatos_derecha:
+            candidatos_derecha.sort(key=lambda x: x[2])  # Ordenar por posición Y (más arriba primero)
+            mejor_candidato = str(candidatos_derecha[0][0])
+            st.success(f"✅ Pasos encontrados en esquina superior derecha: {mejor_candidato}")
+            return mejor_candidato
+        
+        # Estrategia 4: Búsqueda general de números que podrían ser pasos
+        st.warning("Buscando números de pasos en toda la página...")
         elementos_numericos = driver.find_elements(By.XPATH, "//*[text()]")
-        candidatos_pasos = []
+        candidatos_generales = []
         
         for elemento in elementos_numericos:
             if elemento.is_displayed():
@@ -610,15 +681,17 @@ def find_cantidad_pasos_alma(driver):
                     num = int(texto)
                     # Rango razonable para cantidad de pasos
                     if 100 <= num <= 2000:
-                        candidatos_pasos.append((num, texto))
+                        candidatos_generales.append((num, texto))
         
-        # Si hay candidatos, tomar el más probable
-        if candidatos_pasos:
-            # Ordenar y tomar el del medio
-            candidatos_pasos.sort()
-            mejor_candidato = str(candidatos_pasos[len(candidatos_pasos)//2][0])
-            st.success(f"✅ Pasos encontrados (mejor candidato): {mejor_candidato}")
-            return mejor_candidato
+        # Si hay candidatos, tomar el más común o el del medio
+        if candidatos_generales:
+            # Contar frecuencia de cada número
+            from collections import Counter
+            contador = Counter([num for num, _ in candidatos_generales])
+            numero_mas_comun = contador.most_common(1)[0][0]
+            
+            st.success(f"✅ Pasos encontrados (número más común): {numero_mas_comun}")
+            return str(numero_mas_comun)
         
         st.warning("No se pudo encontrar la cantidad de pasos")
         return None
