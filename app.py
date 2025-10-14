@@ -158,90 +158,158 @@ st.markdown("""
 # ===== FUNCIONES DE EXTRACCIÓN DE EXCEL (ALMA) =====
 
 def extract_date_from_excel(df):
-    """Extraer fecha de la fila 2 del Excel formato 'REPORTE IP/REV 24 DE SEPTIEMBRE DEL 2025'"""
+    """Extraer fecha de la fila 2 del Excel formato 'REPORTE IP/REV 24 DE SEPTIEMBRE DEL 2025'
+       Devuelve fecha en formato YYYY-MM-DD o None.
+    """
     try:
-        fila_2 = df.iloc[1]  # Fila 2 (índice 1)
-        
-        # Buscar la celda que contiene el texto
+        # fila 2 = índice 1
+        if df.shape[0] < 2:
+            return None
+        fila_2 = df.iloc[1]
         for celda in fila_2:
-            if pd.notna(celda):
-                texto = str(celda).upper()
-                
-                # Buscar patrón de fecha: número día, nombre mes, año
-                patron = r'(\d{1,2})\s+DE\s+([A-Z]+)\s+DEL\s+(\d{4})'
+            if pd.notna(celda) and isinstance(celda, str):
+                texto = celda.upper()
+                # Buscar patrón día DE MES DEL YYYY
+                patron = r'(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚÑ]+)\s+DEL\s+(\d{4})'
                 match = re.search(patron, texto)
-                
                 if match:
                     dia, mes_texto, anio = match.groups()
-                    
-                    # Mapa de meses en español
                     meses = {
                         'ENERO': '01', 'FEBRERO': '02', 'MARZO': '03', 'ABRIL': '04',
                         'MAYO': '05', 'JUNIO': '06', 'JULIO': '07', 'AGOSTO': '08',
-                        'SEPTIEMBRE': '09', 'OCTUBRE': '10', 'NOVIEMBRE': '11', 'DICIEMBRE': '12'
+                        'SEPTIEMBRE': '09', 'SETIEMBRE': '09', 'OCTUBRE': '10',
+                        'NOVIEMBRE': '11', 'DICIEMBRE': '12'
                     }
-                    
-                    mes = meses.get(mes_texto, '')
+                    mes = meses.get(mes_texto.strip(), '')
                     if mes:
-                        fecha_formateada = f"{anio}-{mes}-{dia.zfill(2)}"
-                        return fecha_formateada
-        
+                        return f"{anio}-{mes}-{str(dia).zfill(2)}"
         return None
-        
     except Exception as e:
         st.error(f"Error extrayendo fecha: {e}")
         return None
 
-def extract_excel_values_alma(uploaded_file):
-    """Extraer TOTAL y NUMERO DE REGISTROS del Excel único de ALMA"""
+def _parse_currency_to_float(value):
+    """Parsea un string tipo '$12.345.678,90' o '12.345.678,90' a float 12345678.9"""
     try:
-        # Leer la única hoja del Excel
+        if value is None:
+            return None
+        if isinstance(value, (int, float, np.integer, np.floating)):
+            return float(value)
+        s = str(value).strip()
+        # eliminar espacios y símbolos
+        s = s.replace(' ', '').replace('\xa0', '')
+        # si tiene $ o COP, quitarlo
+        s = re.sub(r'[^\d,.-]', '', s)
+        # Si hay tanto punto como coma, asumimos que punto es separador de miles
+        if '.' in s and ',' in s:
+            s = s.replace('.', '').replace(',', '.')
+        else:
+            # si sólo tiene puntos y más de 1 punto, quitar puntos (miles)
+            if s.count('.') > 1:
+                s = s.replace('.', '')
+            # si sólo tiene coma como decimal
+            if ',' in s and s.count(',') == 1:
+                s = s.replace(',', '.')
+            # si tiene coma múltiples, quitar comas
+            if s.count(',') > 1:
+                s = s.replace(',', '')
+        if s == '':
+            return None
+        return float(s)
+    except Exception:
+        return None
+
+def extract_excel_values_alma(uploaded_file):
+    """Extraer TOTAL y NUMERO DE REGISTROS del Excel único de ALMA
+       Retorna (valor_total, numero_registros, fecha) donde:
+         - valor_total: float (o None)
+         - numero_registros: int (o None)
+         - fecha: 'YYYY-MM-DD' (o None)
+    """
+    try:
+        # Leer la hoja 0 sin encabezados
         df = pd.read_excel(uploaded_file, sheet_name=0, header=None)
-        
-        # Extraer fecha
         fecha = extract_date_from_excel(df)
-        
         valor_total = None
         numero_registros = None
-        
-        # Buscar "TOTAL" y "NUMERO DE REGISTROS" en el DataFrame
-        for i in range(len(df)):
-            for j in range(len(df.columns)):
-                celda = df.iloc[i, j]
-                
-                if pd.notna(celda):
-                    celda_str = str(celda).upper().strip()
-                    
-                    # Buscar TOTAL
-                    if 'TOTAL' in celda_str and valor_total is None:
-                        # El valor está a la derecha (siguiente celda)
-                        if j + 1 < len(df.columns):
-                            valor_candidato = df.iloc[i, j + 1]
-                            if pd.notna(valor_candidato):
-                                try:
-                                    # Limpiar y convertir a número
-                                    valor_limpio = str(valor_candidato).replace('$', '').replace('.', '').replace(',', '').strip()
-                                    if valor_limpio.isdigit():
-                                        valor_total = int(valor_limpio)
-                                except:
-                                    pass
-                    
-                    # Buscar NUMERO DE REGISTROS
-                    if 'NUMERO' in celda_str and 'REGISTRO' in celda_str and numero_registros is None:
-                        # El valor está a la derecha
-                        if j + 1 < len(df.columns):
-                            registro_candidato = df.iloc[i, j + 1]
-                            if pd.notna(registro_candidato):
-                                try:
-                                    # Limpiar y convertir a número
-                                    registro_limpio = str(registro_candidato).replace(',', '').strip()
-                                    if registro_limpio.isdigit():
-                                        numero_registros = int(registro_limpio)
-                                except:
-                                    pass
-        
+
+        # Normalizar texto de búsqueda
+        rows = df.values.tolist()
+
+        for i, row in enumerate(rows):
+            # construir versión en mayúsculas para búsquedas
+            fila_textos = []
+            for v in row:
+                if pd.isna(v):
+                    fila_textos.append('')
+                else:
+                    fila_textos.append(str(v).upper())
+
+            # Si fila contiene 'TOTAL' buscar valor en columnas a la derecha
+            if any('TOTAL' in t for t in fila_textos):
+                # buscar valor numérico en la misma fila: derecha 1..3 columnas
+                for offset in range(1, 4):
+                    for j, cell in enumerate(row):
+                        if pd.isna(cell):
+                            continue
+                        # Si la celda actual (j) contiene TOTAL (chequeamos en fila_textos)
+                        if 'TOTAL' in fila_textos[j]:
+                            # comprobar j+offset
+                            right_idx = j + offset
+                            if right_idx < len(row):
+                                candidato = row[right_idx]
+                                parsed = _parse_currency_to_float(candidato)
+                                if parsed is not None:
+                                    valor_total = parsed
+                                    break
+                    if valor_total is not None:
+                        break
+
+            # Si fila contiene 'REGISTRO' (o variantes) buscar número de registros
+            if any('REGISTRO' in t or 'REGISTROS' in t or 'NUMERO' in t or 'N°' in t for t in fila_textos):
+                for offset in range(1, 4):
+                    for j, cell in enumerate(row):
+                        if pd.isna(cell):
+                            continue
+                        if 'REGISTRO' in fila_textos[j] or 'REGISTROS' in fila_textos[j] or 'NUMERO' in fila_textos[j] or 'N°' in fila_textos[j]:
+                            right_idx = j + offset
+                            if right_idx < len(row):
+                                candidato = row[right_idx]
+                                # limpiar y convertir a int si es posible
+                                if isinstance(candidato, (int, np.integer)):
+                                    numero_registros = int(candidato)
+                                    break
+                                # si viene como float convertible
+                                if isinstance(candidato, (float, np.floating)):
+                                    numero_registros = int(candidato)
+                                    break
+                                # si viene como string con separadores
+                                cand_str = str(candidato).replace('.', '').replace(',', '').strip()
+                                if cand_str.isdigit():
+                                    numero_registros = int(cand_str)
+                                    break
+                    if numero_registros is not None:
+                        break
+
+            # si ambos encontrados, salir
+            if valor_total is not None and numero_registros is not None:
+                break
+
+        # Caso especial: si no se encontró valor_total buscando 'TOTAL', pero columna H (índice 7) tiene moneda
+        if valor_total is None:
+            # inspeccionar últimas filas por una celda que parezca moneda (por ejemplo en columna 7 o cercana)
+            for r in rows[-6:]:
+                for candidate in r:
+                    val = _parse_currency_to_float(candidate)
+                    if val is not None:
+                        # asumimos el primer candidato encontrado en las últimas filas es el total
+                        valor_total = val
+                        break
+                if valor_total is not None:
+                    break
+
         return valor_total, numero_registros, fecha
-        
+
     except Exception as e:
         st.error(f"Error procesando archivo Excel: {str(e)}")
         return None, None, None
@@ -594,7 +662,7 @@ def main():
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                st.metric("TOTAL", f"${valor_total:,}".replace(",", "."))
+                st.metric("TOTAL", f"${valor_total:,.0f}".replace(",", "."))
             
             with col2:
                 st.metric("NÚMERO DE REGISTROS", f"{numero_registros:,}".replace(",", "."))
@@ -760,8 +828,8 @@ def main():
                 st.markdown("""
                 - Verifica que el Excel sea de ALMA y tenga una única hoja
                 - Asegúrate que la fila 2 contenga el texto con la fecha (ej: "REPORTE IP/REV 24 DE SEPTIEMBRE DEL 2025")
-                - El archivo debe contener las palabras "TOTAL" y "NUMERO DE REGISTROS"
-                - Los valores deben estar en las celdas adyacentes derechas (columna siguiente)
+                - El archivo debe contener las palabras "TOTAL" y "NUMERO DE REGISTROS" o que en sus últimas filas aparezcan el total y el conteo.
+                - Los valores pueden estar 1 o 2 columnas a la derecha de la etiqueta.
                 """)
     
     else:
@@ -775,25 +843,11 @@ def main():
         1. **Cargar Excel**: Archivo ALMA con una única hoja
         2. **Extracción automática**: 
            - Busca la fecha en la fila 2
-           - Busca "TOTAL" y trae el valor a la derecha
-           - Busca "NUMERO DE REGISTROS" y trae el valor a la derecha
+           - Busca "TOTAL" y trae el valor a la derecha (1-3 columnas)
+           - Busca "NUMERO DE REGISTROS" y trae el valor a la derecha (1-3 columnas)
         3. **Extracción Power BI**: Navega a la conciliación ALMA de la fecha extraída
         4. **Comparación**: Compara VALOR A PAGAR A COMERCIO y CANTIDAD DE PASOS
-        
-        **Características:**
-        - ✅ Extracción automática de fecha desde el Excel
-        - ✅ Búsqueda inteligente de TOTAL y NUMERO DE REGISTROS
-        - ✅ Comparación de valores monetarios
-        - ✅ Comparación de cantidad de pasos/registros
-        - ✅ Validación completa con tabla detallada
-        - ✅ Capturas del proceso para verificación
-        
-        **Formato esperado del Excel:**
-        - Fila 2: Contiene texto como "REPORTE IP/REV 24 DE SEPTIEMBRE DEL 2025"
-        - En algún lugar: "TOTAL" | [valor en la celda siguiente]
-        - En algún lugar: "NUMERO DE REGISTROS" | [valor en la celda siguiente]
         """)
-
 if __name__ == "__main__":
     main()
 
