@@ -613,6 +613,8 @@ def find_cantidad_pasos_alma(driver):
             "//*[contains(text(), 'CANTIDAD DE PASOS')]",
             "//*[contains(text(), 'Cantidad de pasos')]",
             "//*[contains(text(), 'CANTIDAD') and contains(text(), 'PASOS')]",
+            "//*[contains(text(), 'CANTIDADPASOS')]",
+            "//*[contains(text(), 'CantidadPasos')]",
             "//*[contains(text(), 'NÚMERO DE REGISTROS')]",
             "//*[contains(text(), 'Numero de registros')]",
             "//*[contains(text(), 'REGISTROS')]",
@@ -633,51 +635,89 @@ def find_cantidad_pasos_alma(driver):
             except:
                 continue
         
-        if not titulo_element:
-            st.warning("No se encontró 'CANTIDAD DE PASOS', buscando números de registros...")
-            # Buscar números que podrían ser la cantidad
-            elementos_numericos = driver.find_elements(By.XPATH, "//*[text()]")
-            for elemento in elementos_numericos:
-                if elemento.is_displayed():
-                    texto = elemento.text.strip()
-                    # Buscar números enteros sin símbolos de moneda
-                    if texto and texto.isdigit() and len(texto) < 8:  # Números razonables para pasos
-                        st.success(f"🔢 Posible cantidad de pasos: {texto}")
-                        return texto
-            return None
-        
-        # Buscar el valor asociado al título
-        try:
-            container = titulo_element.find_element(By.XPATH, "./ancestor::*[contains(@class, 'card') or contains(@class, 'visual')][1]")
-            numeric_elements = container.find_elements(By.XPATH, ".//*[text()]")
+        if titulo_element:
+            texto_completo = titulo_element.text.strip()
+            st.info(f"📝 Texto completo del elemento: '{texto_completo}'")
             
-            for elem in numeric_elements:
-                texto = elem.text.strip()
-                if texto and any(char.isdigit() for char in texto) and len(texto) < 20:
-                    if texto != titulo_element.text and not any(car in texto for car in ['$', ',', '.']):
-                        # Es probable que sea un número entero (pasos)
-                        texto_limpio = re.sub(r'[^\d]', '', texto)
-                        if texto_limpio:
-                            st.success(f"✅ Cantidad de pasos encontrada: {texto_limpio}")
-                            return texto_limpio
-        except:
-            pass
-        
-        # Estrategia alternativa
-        try:
-            parent = titulo_element.find_element(By.XPATH, "./..")
-            siblings = parent.find_elements(By.XPATH, "./*")
+            # CASO 1: El valor está pegado al título (ej: "CANTIDADPASOS552")
+            if 'CANTIDADPASOS' in texto_completo.upper():
+                # Extraer números del texto completo
+                numeros = re.findall(r'\d+', texto_completo)
+                if numeros:
+                    cantidad = numeros[0]
+                    st.success(f"✅ Cantidad de pasos extraída (pegado): {cantidad}")
+                    return cantidad
             
-            for sibling in siblings:
-                if sibling != titulo_element:
-                    texto = sibling.text.strip()
-                    if texto and any(char.isdigit() for char in texto):
-                        texto_limpio = re.sub(r'[^\d]', '', texto)
-                        if texto_limpio:
-                            st.success(f"✅ Cantidad de pasos encontrada (hermano): {texto_limpio}")
-                            return texto_limpio
-        except:
-            pass
+            # CASO 2: Buscar en el mismo elemento pero separado
+            if 'PASOS' in texto_completo.upper():
+                # Buscar números en el mismo texto
+                numeros = re.findall(r'\d+', texto_completo)
+                if numeros:
+                    # Tomar el último número (podría ser el valor)
+                    cantidad = numeros[-1]
+                    st.success(f"✅ Cantidad de pasos extraída (mismo texto): {cantidad}")
+                    return cantidad
+            
+            # CASO 3: Buscar en elementos hermanos o contenedor
+            try:
+                # Buscar en el contenedor padre
+                container = titulo_element.find_element(By.XPATH, "./ancestor::*[contains(@class, 'card') or contains(@class, 'visual') or contains(@style, 'card')][1]")
+                todos_elementos = container.find_elements(By.XPATH, ".//*[text()]")
+                
+                for elem in todos_elementos:
+                    texto = elem.text.strip()
+                    if texto and texto != texto_completo:
+                        # Buscar números en elementos cercanos
+                        if any(char.isdigit() for char in texto):
+                            numeros = re.findall(r'\d+', texto)
+                            if numeros:
+                                cantidad = numeros[0]
+                                # Verificar que sea un número razonable para pasos
+                                if 1 <= int(cantidad) <= 999999:
+                                    st.success(f"✅ Cantidad de pasos encontrada (contendor): {cantidad}")
+                                    return cantidad
+            except Exception as e:
+                st.warning(f"Búsqueda en contenedor no exitosa: {e}")
+            
+            # CASO 4: Buscar elementos hermanos
+            try:
+                parent = titulo_element.find_element(By.XPATH, "./..")
+                siblings = parent.find_elements(By.XPATH, "./*")
+                
+                for sibling in siblings:
+                    if sibling != titulo_element:
+                        texto = sibling.text.strip()
+                        if texto and any(char.isdigit() for char in texto):
+                            numeros = re.findall(r'\d+', texto)
+                            if numeros:
+                                cantidad = numeros[0]
+                                if 1 <= int(cantidad) <= 999999:
+                                    st.success(f"✅ Cantidad de pasos encontrada (hermano): {cantidad}")
+                                    return cantidad
+            except Exception as e:
+                st.warning(f"Búsqueda en hermanos no exitosa: {e}")
+        
+        # CASO 5: Búsqueda directa de números que podrían ser pasos
+        st.warning("Buscando números directamente en la página...")
+        elementos_numericos = driver.find_elements(By.XPATH, "//*[text()]")
+        candidatos = []
+        
+        for elemento in elementos_numericos:
+            if elemento.is_displayed():
+                texto = elemento.text.strip()
+                # Buscar números sin símbolos de moneda y que sean razonables para pasos
+                if texto and texto.isdigit() and len(texto) < 8:
+                    num = int(texto)
+                    if 100 <= num <= 999999:  # Rango razonable para pasos
+                        candidatos.append((num, texto))
+        
+        # Ordenar candidatos y tomar el más probable
+        if candidatos:
+            candidatos.sort()
+            # Tomar el del medio o el más común
+            cantidad = str(candidatos[len(candidatos)//2][0])
+            st.success(f"✅ Cantidad de pasos encontrada (búsqueda directa): {cantidad}")
+            return cantidad
         
         st.warning("No se pudo encontrar el valor de pasos específico")
         return None
