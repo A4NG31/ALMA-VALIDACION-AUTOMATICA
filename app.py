@@ -34,7 +34,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-from collections import Counter
 import time
 import re
 import tempfile
@@ -505,58 +504,67 @@ def click_conciliacion_alma(driver, fecha_objetivo):
         return False
 
 def find_valor_a_pagar_alma(driver):
-    """Buscar 'VALOR A PAGAR A COMERCIO' en Power BI ALMA - VERSIÓN CORREGIDA"""
+    """Buscar 'VALOR A PAGAR A COMERCIO' en Power BI ALMA - VERSIÓN MEJORADA"""
     try:
-        # Buscar en todos los elementos de texto
-        elementos = driver.find_elements(By.XPATH, "//*[text()]")
+        # Buscar por diferentes patrones del título
+        titulo_selectors = [
+            "//*[contains(text(), 'VALOR A PAGAR A COMERCIO')]",
+            "//*[contains(text(), 'Valor a pagar a comercio')]",
+            "//*[contains(text(), 'VALOR A PAGAR') and contains(text(), 'COMERCIO')]",
+        ]
         
-        for elemento in elementos:
-            if elemento.is_displayed():
-                texto = elemento.text.strip()
-                
-                # Buscar el patrón que contiene ambos valores juntos
-                if 'VALOR A PAGAR A COMERCIO' in texto and 'CANTIDADPASOS' in texto:
-                    st.info(f"📝 Texto completo encontrado: '{texto}'")
-                    
-                    # Extraer el valor numérico usando regex - buscar número después de "VALOR A PAGAR A COMERCIO"
-                    # Patrón: busca cualquier número con comas después del texto del valor
-                    patron_valor = r'VALOR A PAGAR A COMERCIO[^\d]*([\d,]+)'
-                    match_valor = re.search(patron_valor, texto)
-                    
-                    if match_valor:
-                        valor_extraido = match_valor.group(1)
-                        st.success(f"✅ Valor extraído correctamente: {valor_extraido}")
-                        return valor_extraido
-                    
-                    # Si no funciona el primer patrón, intentar otro enfoque
-                    patron_valor_alt = r'VALOR A PAGAR A COMERCIO.*?(\d{1,3}(?:,\d{3})*)'
-                    match_valor_alt = re.search(patron_valor_alt, texto)
-                    
-                    if match_valor_alt:
-                        valor_extraido = match_valor_alt.group(1)
-                        st.success(f"✅ Valor extraído (alternativo): {valor_extraido}")
-                        return valor_extraido
+        titulo_element = None
+        for selector in titulo_selectors:
+            try:
+                elementos = driver.find_elements(By.XPATH, selector)
+                for elemento in elementos:
+                    if elemento.is_displayed():
+                        titulo_element = elemento
+                        st.success(f"✅ Título valor encontrado: {elemento.text}")
+                        break
+                if titulo_element:
+                    break
+            except:
+                continue
         
-        # Si no se encuentra el texto combinado, buscar por separado
-        st.warning("No se encontró el texto combinado, buscando por separado...")
+        if not titulo_element:
+            st.error("No se encontró 'VALOR A PAGAR A COMERCIO'")
+            return None
         
-        # Buscar elementos que contengan el valor numérico grande (probablemente el total)
-        elementos_numericos = driver.find_elements(By.XPATH, "//*[text()]")
-        for elemento in elementos_numericos:
-            if elemento.is_displayed():
-                texto = elemento.text.strip()
-                # Buscar números grandes con formato de moneda
-                if texto and re.match(r'^\$?[\d,]+$', texto.replace(' ', '')):
-                    # Verificar que sea un número razonable para un pago
-                    numero_limpio = texto.replace('$', '').replace(',', '').replace(' ', '')
-                    if numero_limpio.isdigit():
-                        valor_num = int(numero_limpio)
-                        if 1000000 <= valor_num <= 50000000:  # Rango razonable para pagos
-                            st.success(f"💰 Valor candidato encontrado: {texto}")
-                            # Extraer solo los números sin el símbolo $
-                            match = re.search(r'([\d,]+)', texto)
-                            if match:
-                                return match.group(1)
+        # Buscar en el contenedor
+        try:
+            container = titulo_element.find_element(By.XPATH, "./..")
+            numeric_elements = container.find_elements(By.XPATH, ".//*")
+            
+            for elem in numeric_elements:
+                texto = elem.text.strip()
+                if texto and any(char.isdigit() for char in texto) and len(texto) < 50:
+                    if texto != titulo_element.text:
+                        # Extraer solo números y comas (formato de moneda)
+                        match = re.search(r'([\d,]+)', texto)
+                        if match:
+                            valor = match.group(1)
+                            st.success(f"✅ Valor encontrado: {valor}")
+                            return valor
+        except:
+            pass
+        
+        # Estrategia 2: elementos hermanos
+        try:
+            parent = titulo_element.find_element(By.XPATH, "./..")
+            siblings = parent.find_elements(By.XPATH, "./*")
+            
+            for sibling in siblings:
+                if sibling != titulo_element:
+                    texto = sibling.text.strip()
+                    if texto and any(char.isdigit() for char in texto):
+                        match = re.search(r'([\d,]+)', texto)
+                        if match:
+                            valor = match.group(1)
+                            st.success(f"✅ Valor encontrado en hermano: {valor}")
+                            return valor
+        except:
+            pass
         
         st.error("No se pudo encontrar el valor numérico")
         return None
@@ -566,118 +574,140 @@ def find_valor_a_pagar_alma(driver):
         return None
 
 def find_cantidad_pasos_alma(driver):
-    """Buscar 'CANTIDAD DE PASOS' en Power BI ALMA - VERSIÓN PRECISA"""
+    """Buscar la tarjeta/table 'CANTIDAD PASOS' a la derecha de 'VALOR A PAGAR A COMERCIO'"""
     try:
-        # Buscar en todos los elementos de texto
-        elementos = driver.find_elements(By.XPATH, "//*[text()]")
+        # Buscar por diferentes patrones del título - MÁS ESPECÍFICO
+        titulo_selectors = [
+            "//*[contains(text(), 'CANTIDAD PASOS')]",
+            "//*[contains(text(), 'Cantidad Pasos')]",
+            "//*[contains(text(), 'CANTIDAD DE PASOS')]",
+            "//*[contains(text(), 'Cantidad de Pasos')]",
+            "//*[contains(text(), 'CANTIDAD') and contains(text(), 'PASOS')]",
+            "//*[text()='CANTIDAD PASOS']",
+            "//*[text()='Cantidad Pasos']",
+        ]
         
-        for elemento in elementos:
-            if elemento.is_displayed():
-                texto = elemento.text.strip()
-                
-                # DEBUG: Mostrar solo textos que contengan CANTIDADPASOS
-                if 'CANTIDADPASOS' in texto.upper():
-                    st.info(f"🔍 Elemento con CANTIDADPASOS: '{texto}'")
-                
-                # Método 1: Buscar el patrón exacto CANTIDADPASOS seguido inmediatamente de números
-                if 'CANTIDADPASOS' in texto.upper():
-                    # Usar regex para encontrar CANTIDADPASOS seguido inmediatamente de números
-                    patron = r'CANTIDADPASOS(\d+)'
-                    match = re.search(patron, texto, re.IGNORECASE)
-                    if match:
-                        pasos = match.group(1)
-                        st.success(f"✅ Pasos extraídos (patrón exacto): {pasos}")
-                        return pasos
+        titulo_element = None
+        for selector in titulo_selectors:
+            try:
+                elementos = driver.find_elements(By.XPATH, selector)
+                for elemento in elementos:
+                    if elemento.is_displayed():
+                        texto = elemento.text.strip()
+                        if any(palabra in texto.upper() for palabra in ['CANTIDAD', 'PASOS']):
+                            titulo_element = elemento
+                            st.success(f"✅ Título encontrado: {texto}")
+                            break
+                if titulo_element:
+                    break
+            except Exception as e:
+                continue
         
-        # Método 2: Buscar en elementos que tengan espacios entre caracteres
-        for elemento in elementos:
-            if elemento.is_displayed():
-                texto = elemento.text.strip()
-                texto_sin_espacios = texto.replace(' ', '')
-                
-                if 'CANTIDADPASOS' in texto_sin_espacios.upper():
-                    patron = r'CANTIDADPASOS(\d+)'
-                    match = re.search(patron, texto_sin_espacios, re.IGNORECASE)
-                    if match:
-                        pasos = match.group(1)
-                        st.success(f"✅ Pasos extraídos (sin espacios): {pasos}")
-                        return pasos
+        if not titulo_element:
+            st.warning("❌ No se encontró el título 'CANTIDAD PASOS'")
+            return None
         
-        # Método 3: Buscar específicamente el elemento que contiene ambos valores
-        for elemento in elementos:
-            if elemento.is_displayed():
-                texto = elemento.text.strip()
-                
-                # Buscar elementos que contengan ambos patrones
-                if 'VALOR A PAGAR A COMERCIO' in texto and 'CANTIDADPASOS' in texto:
-                    st.info(f"🎯 Elemento con ambos valores: '{texto}'")
+        # ESTRATEGIA MEJORADA: Buscar en el mismo contenedor o contenedores cercanos
+        try:
+            # Buscar en el contenedor padre
+            container = titulo_element.find_element(By.XPATH, "./..")
+            
+            # Buscar TODOS los elementos numéricos en el contenedor
+            all_elements = container.find_elements(By.XPATH, ".//*")
+            
+            for elem in all_elements:
+                texto = elem.text.strip()
+                # Verificar si es un número (contiene dígitos pero no texto largo)
+                if (texto and 
+                    any(char.isdigit() for char in texto) and 
+                    len(texto) < 20 and 
+                    texto != titulo_element.text and
+                    not any(word in texto.upper() for word in ['TOTAL', 'VALOR', 'PAGAR', 'COMERCIO', 'CANTIDAD', 'PASOS'])):
                     
-                    # Extraer la parte después de CANTIDADPASOS
-                    texto_limpio = texto.replace(' ', '')
-                    pos_pasos = texto_limpio.upper().find('CANTIDADPASOS')
-                    if pos_pasos != -1:
-                        texto_despues_pasos = texto_limpio[pos_pasos + len('CANTIDADPASOS'):]
+                    # Verificar formato numérico (puede tener comas, puntos, pero ser principalmente números)
+                    digit_count = sum(char.isdigit() for char in texto)
+                    if digit_count >= 1:  # Al menos un dígito
+                        st.success(f"✅ Valor numérico encontrado: {texto}")
+                        return texto
                         
-                        # Tomar solo los dígitos inmediatamente después de CANTIDADPASOS
-                        match_pasos = re.search(r'^\d+', texto_despues_pasos)
-                        if match_pasos:
-                            pasos = match_pasos.group(0)
-                            st.success(f"✅ Pasos extraídos (inmediatos después CANTIDADPASOS): {pasos}")
-                            return pasos
+        except Exception as e:
+            st.warning(f"⚠️ Estrategia 1 falló: {e}")
         
-        # Método 4: Buscar números que estén en la posición correcta después de CANTIDADPASOS
-        for elemento in elementos:
-            if elemento.is_displayed():
-                texto = elemento.text.strip()
-                
-                if 'CANTIDADPASOS' in texto.upper():
-                    # Dividir el texto en líneas o partes
-                    partes = texto.split()
-                    for i, parte in enumerate(partes):
-                        if 'CANTIDADPASOS' in parte.upper():
-                            # Verificar si la siguiente parte es un número
-                            if i + 1 < len(partes):
-                                siguiente_parte = partes[i + 1]
-                                if siguiente_parte.isdigit():
-                                    st.success(f"✅ Pasos encontrados (siguiente parte): {siguiente_parte}")
-                                    return siguiente_parte
-        
-        # Método 5: Búsqueda más agresiva - extraer todos los números y determinar cuál es el correcto
-        for elemento in elementos:
-            if elemento.is_displayed():
-                texto = elemento.text.strip()
-                
-                if 'CANTIDADPASOS' in texto.upper() and 'VALOR' in texto.upper():
-                    # Extraer todos los números del texto
-                    numeros = re.findall(r'\d+', texto.replace(',', ''))
-                    
-                    # Filtrar números que sean razonables para pasos (no valores de dinero)
-                    posibles_pasos = []
-                    for num in numeros:
-                        num_int = int(num)
-                        # Los pasos suelen ser números más pequeños que los valores de dinero
-                        if 100 <= num_int <= 5000:  # Rango razonable para pasos
-                            posibles_pasos.append(num)
-                    
-                    if len(posibles_pasos) == 1:
-                        st.success(f"✅ Pasos encontrados (único número en rango): {posibles_pasos[0]}")
-                        return posibles_pasos[0]
-                    elif len(posibles_pasos) > 1:
-                        # Si hay múltiples, tomar el que esté después de CANTIDADPASOS
-                        texto_limpio = texto.replace(' ', '')
-                        pos_pasos = texto_limpio.upper().find('CANTIDADPASOS')
+        # ESTRATEGIA 2: Buscar elementos hermanos específicamente
+        try:
+            parent = titulo_element.find_element(By.XPATH, "./..")
+            siblings = parent.find_elements(By.XPATH, "./*")
+            
+            for sibling in siblings:
+                if sibling != titulo_element:
+                    texto = sibling.text.strip()
+                    if (texto and 
+                        any(char.isdigit() for char in texto) and 
+                        len(texto) < 20 and
+                        not any(word in texto.upper() for word in ['TOTAL', 'VALOR', 'PAGAR', 'COMERCIO', 'CANTIDAD', 'PASOS'])):
                         
-                        for num in posibles_pasos:
-                            pos_num = texto_limpio.find(num)
-                            if pos_num > pos_pasos:  # El número está después de CANTIDADPASOS
-                                st.success(f"✅ Pasos encontrados (después de CANTIDADPASOS): {num}")
-                                return num
+                        digit_count = sum(char.isdigit() for char in texto)
+                        if digit_count >= 1:
+                            st.success(f"✅ Valor encontrado en hermano: {texto}")
+                            return texto
+        except Exception as e:
+            st.warning(f"⚠️ Estrategia 2 falló: {e}")
         
-        st.warning("No se pudo encontrar la cantidad de pasos")
+        # ESTRATEGIA 3: Buscar elementos que siguen al título
+        try:
+            # Buscar elementos que están después del título
+            following_elements = driver.find_elements(By.XPATH, f"//*[contains(text(), 'CANTIDAD PASOS')]/following::*")
+            
+            for i, elem in enumerate(following_elements[:20]):  # Buscar en los primeros 20 elementos siguientes
+                texto = elem.text.strip()
+                if (texto and 
+                    any(char.isdigit() for char in texto) and 
+                    len(texto) < 20 and
+                    not any(word in texto.upper() for word in ['TOTAL', 'VALOR', 'PAGAR', 'COMERCIO', 'CANTIDAD', 'PASOS'])):
+                    
+                    digit_count = sum(char.isdigit() for char in texto)
+                    if digit_count >= 1:
+                        st.success(f"✅ Valor encontrado en elemento siguiente: {texto}")
+                        return texto
+        except Exception as e:
+            st.warning(f"⚠️ Estrategia 3 falló: {e}")
+        
+        # ESTRATEGIA 4: Buscar cerca de "VALOR A PAGAR A COMERCIO"
+        try:
+            # Encontrar "VALOR A PAGAR A COMERCIO" primero
+            valor_element = driver.find_element(By.XPATH, "//*[contains(text(), 'VALOR A PAGAR A COMERCIO')]")
+            if valor_element:
+                # Buscar elementos a la derecha o cerca
+                container_valor = valor_element.find_element(By.XPATH, "./..")
+                # Buscar en el mismo nivel jerárquico
+                all_nearby = container_valor.find_elements(By.XPATH, ".//*")
+                
+                for elem in all_nearby:
+                    texto = elem.text.strip()
+                    if (texto and 
+                        any(char.isdigit() for char in texto) and 
+                        len(texto) < 20 and
+                        'CANTIDAD' in texto.upper() and 'PASOS' in texto.upper()):
+                        # Este es el título, buscar el siguiente elemento numérico
+                        continue
+                    
+                    if (texto and 
+                        any(char.isdigit() for char in texto) and 
+                        len(texto) < 20 and
+                        not any(word in texto.upper() for word in ['TOTAL', 'VALOR', 'PAGAR', 'COMERCIO'])):
+                        
+                        digit_count = sum(char.isdigit() for char in texto)
+                        if digit_count >= 1:
+                            st.success(f"✅ Valor encontrado cerca de VALOR A PAGAR: {texto}")
+                            return texto
+        except Exception as e:
+            st.warning(f"⚠️ Estrategia 4 falló: {e}")
+        
+        st.error("❌ No se pudo encontrar el valor numérico de CANTIDAD PASOS")
         return None
         
     except Exception as e:
-        st.error(f"Error buscando pasos: {str(e)}")
+        st.error(f"❌ Error buscando cantidad de pasos: {str(e)}")
         return None
 
 def extract_powerbi_data_alma(fecha_objetivo):
@@ -820,7 +850,7 @@ def main():
     - Comparar con Power BI automáticamente
     
     **Estado:** ✅ ChromeDriver Compatible
-    **Versión:** v1.2 - ALMA Corregido
+    **Versión:** v1.3 - ALMA Mejorado
     """)
     
     # Estado del sistema
@@ -995,9 +1025,10 @@ def main():
         4. **Comparación**: Compara VALOR A PAGAR A COMERCIO y CANTIDAD DE PASOS
         
         **Mejoras en esta versión:**
-        - ✅ Extracción correcta de valores de Power BI
-        - ✅ Manejo mejorado de regex para patrones específicos
-        - ✅ Búsqueda más precisa de números
+        - ✅ Búsqueda específica por tarjetas/tablas individuales
+        - ✅ Múltiples estrategias de búsqueda para mayor robustez
+        - ✅ Filtrado inteligente para evitar falsos positivos
+        - ✅ Mejor manejo de errores y feedback
         """)
 
 if __name__ == "__main__":
@@ -1005,4 +1036,4 @@ if __name__ == "__main__":
 
     # Footer
     st.markdown("---")
-    st.markdown('<div class="footer">💻 Desarrollado por Angel Torres | 🚀 Powered by Streamlit | v1.2 ALMA Corregido</div>', unsafe_allow_html=True)
+    st.markdown('<div class="footer">💻 Desarrollado por Angel Torres | 🚀 Powered by Streamlit | v1.3 ALMA Mejorado</div>', unsafe_allow_html=True)
