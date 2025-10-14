@@ -504,9 +504,32 @@ def click_conciliacion_alma(driver, fecha_objetivo):
         return False
 
 def find_valor_a_pagar_alma(driver):
-    """Buscar 'VALOR A PAGAR A COMERCIO' en Power BI ALMA - VERSIÓN MEJORADA"""
+    """Buscar 'VALOR A PAGAR A COMERCIO' en Power BI ALMA - VERSIÓN ORIGINAL QUE FUNCIONA"""
     try:
-        # Buscar por diferentes patrones del título
+        # Primero buscar el texto completo que contiene ambos valores
+        elementos = driver.find_elements(By.XPATH, "//*[text()]")
+        for elemento in elementos:
+            if elemento.is_displayed():
+                texto = elemento.text.strip()
+                # Buscar el patrón que contiene ambos valores
+                if 'VALOR A PAGAR A COMERCIO' in texto and 'CANTIDADPASOS' in texto:
+                    st.info(f"📝 Texto completo encontrado: '{texto}'")
+                    
+                    # Extraer el valor numérico del pago
+                    match_valor = re.search(r'VALOR A PAGAR A COMERCIO\s*\$?([\d,]+)', texto)
+                    if match_valor:
+                        valor = match_valor.group(1)
+                        st.success(f"✅ Valor extraído: {valor}")
+                        return valor
+                    
+                    # Alternativa: buscar cualquier número grande después de VALOR A PAGAR
+                    match_valor_alt = re.search(r'VALOR A PAGAR A COMERCIO[^\d]*([\d,]+)', texto)
+                    if match_valor_alt:
+                        valor = match_valor_alt.group(1)
+                        st.success(f"✅ Valor extraído (alternativo): {valor}")
+                        return valor
+        
+        # Si no se encuentra el texto combinado, buscar por separado
         titulo_selectors = [
             "//*[contains(text(), 'VALOR A PAGAR A COMERCIO')]",
             "//*[contains(text(), 'Valor a pagar a comercio')]",
@@ -520,7 +543,6 @@ def find_valor_a_pagar_alma(driver):
                 for elemento in elementos:
                     if elemento.is_displayed():
                         titulo_element = elemento
-                        st.success(f"✅ Título valor encontrado: {elemento.text}")
                         break
                 if titulo_element:
                     break
@@ -540,12 +562,10 @@ def find_valor_a_pagar_alma(driver):
                 texto = elem.text.strip()
                 if texto and any(char.isdigit() for char in texto) and len(texto) < 50:
                     if texto != titulo_element.text:
-                        # Extraer solo números y comas (formato de moneda)
+                        # Extraer solo números
                         match = re.search(r'([\d,]+)', texto)
                         if match:
-                            valor = match.group(1)
-                            st.success(f"✅ Valor encontrado: {valor}")
-                            return valor
+                            return match.group(1)
         except:
             pass
         
@@ -560,9 +580,7 @@ def find_valor_a_pagar_alma(driver):
                     if texto and any(char.isdigit() for char in texto):
                         match = re.search(r'([\d,]+)', texto)
                         if match:
-                            valor = match.group(1)
-                            st.success(f"✅ Valor encontrado en hermano: {valor}")
-                            return valor
+                            return match.group(1)
         except:
             pass
         
@@ -1025,10 +1043,9 @@ def main():
         4. **Comparación**: Compara VALOR A PAGAR A COMERCIO y CANTIDAD DE PASOS
         
         **Mejoras en esta versión:**
-        - ✅ Búsqueda específica por tarjetas/tablas individuales
+        - ✅ Función de valores original que funciona
+        - ✅ Función de pasos mejorada que busca específicamente la tarjeta
         - ✅ Múltiples estrategias de búsqueda para mayor robustez
-        - ✅ Filtrado inteligente para evitar falsos positivos
-        - ✅ Mejor manejo de errores y feedback
         """)
 
 if __name__ == "__main__":
