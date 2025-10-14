@@ -191,7 +191,8 @@ def extract_date_from_excel(df):
 def _parse_currency_to_float(value):
     """Parsea un string tipo '$12.345.678,90' o '12.345.678,90' a float 12345678.9"""
     try:
-        if value is None:
+        # VERIFICAR SI ES NaN PRIMERO
+        if value is None or (isinstance(value, (float, np.floating)) and pd.isna(value)):
             return None
         if isinstance(value, (int, float, np.integer, np.floating)):
             return float(value)
@@ -213,7 +214,7 @@ def _parse_currency_to_float(value):
             # si tiene coma múltiples, quitar comas
             if s.count(',') > 1:
                 s = s.replace(',', '')
-        if s == '':
+        if s == '' or s == '-':
             return None
         return float(s)
     except Exception:
@@ -275,12 +276,18 @@ def extract_excel_values_alma(uploaded_file):
                             right_idx = j + offset
                             if right_idx < len(row):
                                 candidato = row[right_idx]
+                                # VERIFICAR SI ES NaN ANTES DE CONVERTIR
+                                if pd.isna(candidato):
+                                    continue
                                 # limpiar y convertir a int si es posible
                                 if isinstance(candidato, (int, np.integer)):
                                     numero_registros = int(candidato)
                                     break
-                                # si viene como float convertible
+                                # si viene como float convertible (y no es NaN)
                                 if isinstance(candidato, (float, np.floating)):
+                                    # VERIFICAR EXPLÍCITAMENTE QUE NO SEA NaN
+                                    if pd.isna(candidato):
+                                        continue
                                     numero_registros = int(candidato)
                                     break
                                 # si viene como string con separadores
@@ -295,11 +302,14 @@ def extract_excel_values_alma(uploaded_file):
             if valor_total is not None and numero_registros is not None:
                 break
 
-        # Caso especial: si no se encontró valor_total buscando 'TOTAL', pero columna H (índice 7) tiene moneda
+        # Caso especial: si no se encontró valor_total buscando 'TOTAL', buscar en últimas filas
         if valor_total is None:
-            # inspeccionar últimas filas por una celda que parezca moneda (por ejemplo en columna 7 o cercana)
+            # inspeccionar últimas filas por una celda que parezca moneda
             for r in rows[-6:]:
                 for candidate in r:
+                    # VERIFICAR SI ES NaN ANTES DE PROCESAR
+                    if pd.isna(candidate):
+                        continue
                     val = _parse_currency_to_float(candidate)
                     if val is not None:
                         # asumimos el primer candidato encontrado en las últimas filas es el total
@@ -848,6 +858,7 @@ def main():
         3. **Extracción Power BI**: Navega a la conciliación ALMA de la fecha extraída
         4. **Comparación**: Compara VALOR A PAGAR A COMERCIO y CANTIDAD DE PASOS
         """)
+
 if __name__ == "__main__":
     main()
 
