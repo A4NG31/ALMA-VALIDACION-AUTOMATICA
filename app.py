@@ -504,100 +504,58 @@ def click_conciliacion_alma(driver, fecha_objetivo):
         return False
 
 def find_valor_a_pagar_alma(driver):
-    """Buscar 'VALOR A PAGAR A COMERCIO' en Power BI ALMA"""
+    """Buscar 'VALOR A PAGAR A COMERCIO' en Power BI ALMA - VERSIÓN CORREGIDA"""
     try:
-        # Primero intentar encontrar el título
-        titulo_selectors = [
-            "//*[contains(text(), 'VALOR A PAGAR A COMERCIO')]",
-            "//*[contains(text(), 'Valor a pagar a comercio')]",
-            "//*[contains(text(), 'VALOR A PAGAR')]",
-            "//*[contains(text(), 'Valor a pagar')]",
-            "//*[contains(text(), 'TOTAL')]",
-        ]
+        # Buscar en todos los elementos de texto
+        elementos = driver.find_elements(By.XPATH, "//*[text()]")
         
-        titulo_element = None
-        for selector in titulo_selectors:
-            try:
-                elementos = driver.find_elements(By.XPATH, selector)
-                for elemento in elementos:
-                    if elemento.is_displayed():
-                        titulo_element = elemento
-                        st.success(f"✅ Encontrado título: {elemento.text}")
-                        break
-                if titulo_element:
-                    break
-            except:
-                continue
+        for elemento in elementos:
+            if elemento.is_displayed():
+                texto = elemento.text.strip()
+                
+                # Buscar el patrón que contiene ambos valores juntos
+                if 'VALOR A PAGAR A COMERCIO' in texto and 'CANTIDADPASOS' in texto:
+                    st.info(f"📝 Texto completo encontrado: '{texto}'")
+                    
+                    # Extraer el valor numérico usando regex - buscar número después de "VALOR A PAGAR A COMERCIO"
+                    # Patrón: busca cualquier número con comas después del texto del valor
+                    patron_valor = r'VALOR A PAGAR A COMERCIO[^\d]*([\d,]+)'
+                    match_valor = re.search(patron_valor, texto)
+                    
+                    if match_valor:
+                        valor_extraido = match_valor.group(1)
+                        st.success(f"✅ Valor extraído correctamente: {valor_extraido}")
+                        return valor_extraido
+                    
+                    # Si no funciona el primer patrón, intentar otro enfoque
+                    patron_valor_alt = r'VALOR A PAGAR A COMERCIO.*?(\d{1,3}(?:,\d{3})*)'
+                    match_valor_alt = re.search(patron_valor_alt, texto)
+                    
+                    if match_valor_alt:
+                        valor_extraido = match_valor_alt.group(1)
+                        st.success(f"✅ Valor extraído (alternativo): {valor_extraido}")
+                        return valor_extraido
         
-        if not titulo_element:
-            st.warning("No se encontró 'VALOR A PAGAR A COMERCIO', buscando valores numéricos...")
-            # Buscar directamente valores grandes que podrían ser el total
-            elementos_numericos = driver.find_elements(By.XPATH, "//*[text()]")
-            for elemento in elementos_numericos:
-                if elemento.is_displayed():
-                    texto = elemento.text.strip()
-                    # Buscar patrones de moneda grandes
-                    if texto and any(c.isdigit() for c in texto) and len(texto) > 5:
-                        if any(car in texto for car in ['$', ',', '.']) and len(texto) < 20:
+        # Si no se encuentra el texto combinado, buscar por separado
+        st.warning("No se encontró el texto combinado, buscando por separado...")
+        
+        # Buscar elementos que contengan el valor numérico grande (probablemente el total)
+        elementos_numericos = driver.find_elements(By.XPATH, "//*[text()]")
+        for elemento in elementos_numericos:
+            if elemento.is_displayed():
+                texto = elemento.text.strip()
+                # Buscar números grandes con formato de moneda
+                if texto and re.match(r'^\$?[\d,]+$', texto.replace(' ', '')):
+                    # Verificar que sea un número razonable para un pago
+                    numero_limpio = texto.replace('$', '').replace(',', '').replace(' ', '')
+                    if numero_limpio.isdigit():
+                        valor_num = int(numero_limpio)
+                        if 1000000 <= valor_num <= 50000000:  # Rango razonable para pagos
                             st.success(f"💰 Valor candidato encontrado: {texto}")
-                            return texto
-        
-        # Si encontramos el título, buscar el valor asociado
-        if titulo_element:
-            # Estrategia 1: buscar en el mismo contenedor
-            try:
-                container = titulo_element.find_element(By.XPATH, "./ancestor::*[contains(@class, 'card') or contains(@class, 'visual')][1]")
-                todos_textos = container.find_elements(By.XPATH, ".//*[text()]")
-                
-                for elem in todos_textos:
-                    texto = elem.text.strip()
-                    if texto and any(c.isdigit() for c in texto) and texto != titulo_element.text:
-                        if any(car in texto for car in ['$', ',', '.']):
-                            st.success(f"✅ Valor encontrado (mismo contenedor): {texto}")
-                            return texto
-            except:
-                pass
-            
-            # Estrategia 2: buscar elementos hermanos
-            try:
-                parent = titulo_element.find_element(By.XPATH, "./..")
-                siblings = parent.find_elements(By.XPATH, "./*")
-                
-                for sibling in siblings:
-                    if sibling != titulo_element:
-                        texto = sibling.text.strip()
-                        if texto and any(c.isdigit() for c in texto):
-                            if any(car in texto for car in ['$', ',', '.']):
-                                st.success(f"✅ Valor encontrado (hermano): {texto}")
-                                return texto
-            except:
-                pass
-            
-            # Estrategia 3: buscar cerca del título
-            try:
-                # Buscar en un radio de elementos cercanos
-                driver.execute_script("arguments[0].scrollIntoView();", titulo_element)
-                time.sleep(1)
-                
-                # Buscar elementos que estén visualmente cerca
-                location = titulo_element.location
-                size = titulo_element.size
-                
-                elementos_cercanos = driver.find_elements(By.XPATH, f"//*[text()]")
-                for elem in elementos_cercanos:
-                    if elem.is_displayed() and elem != titulo_element:
-                        elem_location = elem.location
-                        elem_text = elem.text.strip()
-                        
-                        # Si está cerca vertical u horizontalmente y tiene números
-                        if (abs(elem_location['y'] - location['y']) < 200 or 
-                            abs(elem_location['x'] - location['x']) < 300):
-                            if elem_text and any(c.isdigit() for c in elem_text):
-                                if any(car in elem_text for car in ['$', ',', '.']):
-                                    st.success(f"✅ Valor encontrado (cercano): {elem_text}")
-                                    return elem_text
-            except:
-                pass
+                            # Extraer solo los números sin el símbolo $
+                            match = re.search(r'([\d,]+)', texto)
+                            if match:
+                                return match.group(1)
         
         st.error("No se pudo encontrar el valor numérico")
         return None
@@ -607,119 +565,62 @@ def find_valor_a_pagar_alma(driver):
         return None
 
 def find_cantidad_pasos_alma(driver):
-    """Buscar 'CANTIDAD DE PASOS' en Power BI ALMA"""
+    """Buscar 'CANTIDAD DE PASOS' en Power BI ALMA - VERSIÓN CORREGIDA"""
     try:
-        titulo_selectors = [
-            "//*[contains(text(), 'CANTIDAD DE PASOS')]",
-            "//*[contains(text(), 'Cantidad de pasos')]",
-            "//*[contains(text(), 'CANTIDAD') and contains(text(), 'PASOS')]",
-            "//*[contains(text(), 'CANTIDADPASOS')]",
-            "//*[contains(text(), 'CantidadPasos')]",
-            "//*[contains(text(), 'NÚMERO DE REGISTROS')]",
-            "//*[contains(text(), 'Numero de registros')]",
-            "//*[contains(text(), 'REGISTROS')]",
-            "//*[contains(text(), 'TOTAL PASOS')]",
-        ]
+        # Buscar en todos los elementos de texto
+        elementos = driver.find_elements(By.XPATH, "//*[text()]")
         
-        titulo_element = None
-        for selector in titulo_selectors:
-            try:
-                elementos = driver.find_elements(By.XPATH, selector)
-                for elemento in elementos:
-                    if elemento.is_displayed():
-                        titulo_element = elemento
-                        st.success(f"✅ Encontrado título pasos: {elemento.text}")
-                        break
-                if titulo_element:
-                    break
-            except:
-                continue
-        
-        if titulo_element:
-            texto_completo = titulo_element.text.strip()
-            st.info(f"📝 Texto completo del elemento: '{texto_completo}'")
-            
-            # CASO 1: El valor está pegado al título (ej: "CANTIDADPASOS552")
-            if 'CANTIDADPASOS' in texto_completo.upper():
-                # Extraer números del texto completo
-                numeros = re.findall(r'\d+', texto_completo)
-                if numeros:
-                    cantidad = numeros[0]
-                    st.success(f"✅ Cantidad de pasos extraída (pegado): {cantidad}")
-                    return cantidad
-            
-            # CASO 2: Buscar en el mismo elemento pero separado
-            if 'PASOS' in texto_completo.upper():
-                # Buscar números en el mismo texto
-                numeros = re.findall(r'\d+', texto_completo)
-                if numeros:
-                    # Tomar el último número (podría ser el valor)
-                    cantidad = numeros[-1]
-                    st.success(f"✅ Cantidad de pasos extraída (mismo texto): {cantidad}")
-                    return cantidad
-            
-            # CASO 3: Buscar en elementos hermanos o contenedor
-            try:
-                # Buscar en el contenedor padre
-                container = titulo_element.find_element(By.XPATH, "./ancestor::*[contains(@class, 'card') or contains(@class, 'visual') or contains(@style, 'card')][1]")
-                todos_elementos = container.find_elements(By.XPATH, ".//*[text()]")
+        for elemento in elementos:
+            if elemento.is_displayed():
+                texto = elemento.text.strip()
                 
-                for elem in todos_elementos:
-                    texto = elem.text.strip()
-                    if texto and texto != texto_completo:
-                        # Buscar números en elementos cercanos
-                        if any(char.isdigit() for char in texto):
-                            numeros = re.findall(r'\d+', texto)
-                            if numeros:
-                                cantidad = numeros[0]
-                                # Verificar que sea un número razonable para pasos
-                                if 1 <= int(cantidad) <= 999999:
-                                    st.success(f"✅ Cantidad de pasos encontrada (contendor): {cantidad}")
-                                    return cantidad
-            except Exception as e:
-                st.warning(f"Búsqueda en contenedor no exitosa: {e}")
-            
-            # CASO 4: Buscar elementos hermanos
-            try:
-                parent = titulo_element.find_element(By.XPATH, "./..")
-                siblings = parent.find_elements(By.XPATH, "./*")
-                
-                for sibling in siblings:
-                    if sibling != titulo_element:
-                        texto = sibling.text.strip()
-                        if texto and any(char.isdigit() for char in texto):
-                            numeros = re.findall(r'\d+', texto)
-                            if numeros:
-                                cantidad = numeros[0]
-                                if 1 <= int(cantidad) <= 999999:
-                                    st.success(f"✅ Cantidad de pasos encontrada (hermano): {cantidad}")
-                                    return cantidad
-            except Exception as e:
-                st.warning(f"Búsqueda en hermanos no exitosa: {e}")
+                # Buscar el patrón que contiene CANTIDADPASOS seguido de números
+                if 'CANTIDADPASOS' in texto:
+                    st.info(f"📝 Texto de pasos encontrado: '{texto}'")
+                    
+                    # Extraer los números inmediatamente después de CANTIDADPASOS
+                    patron_pasos = r'CANTIDADPASOS(\d+)'
+                    match_pasos = re.search(patron_pasos, texto)
+                    
+                    if match_pasos:
+                        pasos_extraidos = match_pasos.group(1)
+                        st.success(f"✅ Pasos extraídos correctamente: {pasos_extraidos}")
+                        return pasos_extraidos
+                    
+                    # Si no funciona el primer patrón, buscar números cerca de CANTIDADPASOS
+                    patron_pasos_alt = r'CANTIDADPASOS[^\d]*(\d+)'
+                    match_pasos_alt = re.search(patron_pasos_alt, texto)
+                    
+                    if match_pasos_alt:
+                        pasos_extraidos = match_pasos_alt.group(1)
+                        st.success(f"✅ Pasos extraídos (alternativo): {pasos_extraidos}")
+                        return pasos_extraidos
         
-        # CASO 5: Búsqueda directa de números que podrían ser pasos
-        st.warning("Buscando números directamente en la página...")
+        # Si no se encuentra CANTIDADPASOS, buscar números que podrían ser pasos
+        st.warning("No se encontró CANTIDADPASOS, buscando números de pasos...")
+        
         elementos_numericos = driver.find_elements(By.XPATH, "//*[text()]")
-        candidatos = []
+        candidatos_pasos = []
         
         for elemento in elementos_numericos:
             if elemento.is_displayed():
                 texto = elemento.text.strip()
-                # Buscar números sin símbolos de moneda y que sean razonables para pasos
-                if texto and texto.isdigit() and len(texto) < 8:
+                # Buscar números enteros sin símbolos de moneda
+                if texto and re.match(r'^\d+$', texto):
                     num = int(texto)
-                    if 100 <= num <= 999999:  # Rango razonable para pasos
-                        candidatos.append((num, texto))
+                    # Rango razonable para cantidad de pasos
+                    if 100 <= num <= 2000:
+                        candidatos_pasos.append((num, texto))
         
-        # Ordenar candidatos y tomar el más probable
-        if candidatos:
-            candidatos.sort()
-            # Tomar el del medio o el más común
-            cantidad = str(candidatos[len(candidatos)//2][0])
-            st.success(f"✅ Cantidad de pasos encontrada (búsqueda directa): {cantidad}")
-            return cantidad
+        # Si hay candidatos, tomar el más probable
+        if candidatos_pasos:
+            # Ordenar y tomar el del medio
+            candidatos_pasos.sort()
+            mejor_candidato = str(candidatos_pasos[len(candidatos_pasos)//2][0])
+            st.success(f"✅ Pasos encontrados (mejor candidato): {mejor_candidato}")
+            return mejor_candidato
         
-        st.warning("No se pudo encontrar el valor de pasos específico")
+        st.warning("No se pudo encontrar la cantidad de pasos")
         return None
         
     except Exception as e:
@@ -866,7 +767,7 @@ def main():
     - Comparar con Power BI automáticamente
     
     **Estado:** ✅ ChromeDriver Compatible
-    **Versión:** v1.1 - ALMA Mejorado
+    **Versión:** v1.2 - ALMA Corregido
     """)
     
     # Estado del sistema
@@ -932,7 +833,7 @@ def main():
                         
                         with col1:
                             if valor_powerbi_texto:
-                                st.metric("VALOR A PAGAR A COMERCIO (BI)", valor_powerbi_texto)
+                                st.metric("VALOR A PAGAR A COMERCIO (BI)", f"${valor_powerbi_texto}")
                             else:
                                 st.warning("Valor no encontrado en Power BI")
                         
@@ -952,20 +853,21 @@ def main():
                                 valor_powerbi_texto, valor_total
                             )
                             
-                            col1, col2, col3 = st.columns([2, 2, 1])
-                            
-                            with col1:
-                                st.metric("Power BI", f"${powerbi_valor:,.0f}".replace(",", "."))
-                            with col2:
-                                st.metric("Excel", f"${excel_valor:,.0f}".replace(",", "."))
-                            with col3:
-                                if coinciden_valor:
-                                    st.markdown("#### ✅")
-                                    st.success("COINCIDE")
-                                else:
-                                    st.markdown("#### ❌")
-                                    st.error("DIFERENCIA")
-                                    st.caption(f"${dif_valor:,.0f}".replace(",", "."))
+                            if powerbi_valor is not None:
+                                col1, col2, col3 = st.columns([2, 2, 1])
+                                
+                                with col1:
+                                    st.metric("Power BI", f"${powerbi_valor:,.0f}".replace(",", "."))
+                                with col2:
+                                    st.metric("Excel", f"${excel_valor:,.0f}".replace(",", "."))
+                                with col3:
+                                    if coinciden_valor:
+                                        st.markdown("#### ✅")
+                                        st.success("COINCIDE")
+                                    else:
+                                        st.markdown("#### ❌")
+                                        st.error("DIFERENCIA")
+                                        st.caption(f"${dif_valor:,.0f}".replace(",", "."))
                         
                         # Comparación de Pasos
                         if cantidad_pasos_powerbi:
@@ -1007,57 +909,6 @@ def main():
                                 st.error("❌ VALIDACIÓN FALLIDA - Existen diferencias en valores y pasos")
                         else:
                             st.warning("⚠️ VALIDACIÓN INCOMPLETA - No se pudieron extraer todos los datos de Power BI")
-                        
-                        # Botón para ver detalles
-                        with st.expander("🔍 Ver Detalles Completos"):
-                            st.markdown("#### 📊 Tabla Detallada de Comparación")
-                            
-                            resumen_data = []
-                            
-                            # Fila de valores
-                            if valor_powerbi_texto:
-                                resumen_data.append({
-                                    'Concepto': 'VALOR TOTAL',
-                                    'Power BI': f"${powerbi_valor:,.0f}".replace(",", "."),
-                                    'Excel': f"${excel_valor:,.0f}".replace(",", "."),
-                                    'Estado': '✅ Coincide' if coinciden_valor else '❌ No coincide',
-                                    'Diferencia': f"${dif_valor:,.0f}".replace(",", "."),
-                                    'Dif. %': f"{(dif_valor/excel_valor*100):.2f}%" if excel_valor > 0 else "N/A"
-                                })
-                            
-                            # Fila de pasos
-                            if cantidad_pasos_powerbi:
-                                resumen_data.append({
-                                    'Concepto': 'REGISTROS/PASOS',
-                                    'Power BI': f"{powerbi_pasos:,}".replace(",", "."),
-                                    'Excel': f"{excel_pasos:,}".replace(",", "."),
-                                    'Estado': '✅ Coincide' if coinciden_pasos else '❌ No coincide',
-                                    'Diferencia': f"{dif_pasos:,}",
-                                    'Dif. %': f"{(dif_pasos/excel_pasos*100):.2f}%" if excel_pasos > 0 else "N/A"
-                                })
-                            
-                            if resumen_data:
-                                df_resumen = pd.DataFrame(resumen_data)
-                                st.dataframe(df_resumen, use_container_width=True, hide_index=True)
-                            else:
-                                st.warning("No hay datos para mostrar en la tabla de comparación")
-                            
-                            # Screenshots
-                            st.markdown("#### 📸 Capturas del Proceso")
-                            col1, col2, col3 = st.columns(3)
-                            screenshots = resultados.get('screenshots', {})
-                            
-                            if 'inicial' in screenshots and os.path.exists(screenshots['inicial']):
-                                with col1:
-                                    st.image(screenshots['inicial'], caption="Vista Inicial", use_column_width=True)
-                            
-                            if 'seleccion' in screenshots and os.path.exists(screenshots['seleccion']):
-                                with col2:
-                                    st.image(screenshots['seleccion'], caption="Tras Selección", use_column_width=True)
-                            
-                            if 'final' in screenshots and os.path.exists(screenshots['final']):
-                                with col3:
-                                    st.image(screenshots['final'], caption="Vista Final", use_column_width=True)
                     
                     elif resultados:
                         st.error("Se accedió al reporte pero no se encontraron los valores específicos")
@@ -1091,10 +942,9 @@ def main():
         4. **Comparación**: Compara VALOR A PAGAR A COMERCIO y CANTIDAD DE PASOS
         
         **Mejoras en esta versión:**
-        - ✅ Mejor detección de fechas en Power BI
-        - ✅ Búsqueda más robusta de elementos
-        - ✅ Manejo de errores mejorado
-        - ✅ Más formatos de fecha soportados
+        - ✅ Extracción correcta de valores de Power BI
+        - ✅ Manejo mejorado de regex para patrones específicos
+        - ✅ Búsqueda más precisa de números
         """)
 
 if __name__ == "__main__":
@@ -1102,4 +952,4 @@ if __name__ == "__main__":
 
     # Footer
     st.markdown("---")
-    st.markdown('<div class="footer">💻 Desarrollado por Angel Torres | 🚀 Powered by Streamlit | v1.1 ALMA Mejorado</div>', unsafe_allow_html=True)
+    st.markdown('<div class="footer">💻 Desarrollado por Angel Torres | 🚀 Powered by Streamlit | v1.2 ALMA Corregido</div>', unsafe_allow_html=True)
