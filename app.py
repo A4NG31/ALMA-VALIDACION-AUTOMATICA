@@ -768,7 +768,7 @@ def convert_currency_to_float(currency_string):
             return float(currency_string)
             
         if isinstance(currency_string, str):
-            cleaned = currency_string.strip().replace('$', '').replace(' ', '')
+            cleaned = currency_string.strip().replace(', '').replace(' ', '')
             
             if '.' in cleaned and ',' in cleaned:
                 cleaned = cleaned.replace('.', '').replace(',', '.')
@@ -841,7 +841,7 @@ def main():
     - Comparar con Power BI automáticamente
     
     **Estado:** ✅ ChromeDriver Compatible
-    **Versión:** v1.3 - ALMA Mejorado
+    **Versión:** v1.4 - ALMA Automático
     """)
     
     # Estado del sistema
@@ -883,9 +883,9 @@ def main():
             
             st.markdown("---")
             
-            # Extraer de Power BI
+            # Extraer de Power BI automáticamente
             if fecha_extraida:
-                ejecutar_extraccion = st.button("🎯 Extraer de Power BI y Comparar", type="primary", use_container_width=True)
+                ejecutar_extraccion = True
             else:
                 st.warning("No se pudo extraer la fecha automáticamente del Excel")
                 ejecutar_extraccion = False
@@ -1000,25 +1000,25 @@ def main():
                 """)
     
     else:
-        st.info("📁 Por favor, carga un archivo Excel para comenzar la validación")
+        st.info("📁 Por favor, carga un archivo Excel para comenzar la validación automática")
 
     # Información de ayuda
     st.markdown("---")
     with st.expander("ℹ️ Instrucciones de Uso"):
         st.markdown("""
-        **Proceso:**
+        **Proceso Automático:**
         1. **Cargar Excel**: Archivo ALMA con una única hoja
         2. **Extracción automática**: 
            - Busca la fecha en la fila 2
            - Busca "TOTAL" y trae el valor a la derecha (1-3 columnas)
            - Busca "NUMERO DE REGISTROS" y trae el valor a la derecha (1-3 columnas)
-        3. **Extracción Power BI**: Navega a la conciliación ALMA de la fecha extraída
-        4. **Comparación**: Compara VALOR A PAGAR A COMERCIO y CANTIDAD DE PASOS
+        3. **Extracción Power BI**: Navega automáticamente a la conciliación ALMA de la fecha extraída
+        4. **Comparación**: Compara automáticamente VALOR A PAGAR A COMERCIO y CANTIDAD DE PASOS
         
         **Mejoras en esta versión:**
-        - ✅ Función de valores que funciona correctamente
-        - ✅ Función de pasos mejorada que busca específicamente la tarjeta
-        - ✅ Extracción robusta de ambos valores del Power BI
+        - ✅ Extracción automática al cargar el archivo
+        - ✅ Sin necesidad de hacer clic en botones
+        - ✅ Proceso completamente automatizado
         """)
 
 if __name__ == "__main__":
@@ -1026,4 +1026,4 @@ if __name__ == "__main__":
 
     # Footer
     st.markdown("---")
-    st.markdown('<div class="footer">💻 Desarrollado por Angel Torres | 🚀 Powered by Streamlit | v1.3 ALMA Mejorado</div>', unsafe_allow_html=True)
+    st.markdown('<div class="footer">💻 Desarrollado por Angel Torres | 🚀 Powered by Streamlit | v1.4 ALMA Automático</div>', unsafe_allow_html=True)
