@@ -883,15 +883,10 @@ def main():
             
             st.markdown("---")
             
-            # Extraer de Power BI
+            # Extraer de Power BI AUTOMÁTICAMENTE
             if fecha_extraida:
-                ejecutar_extraccion = st.button("🎯 Extraer de Power BI y Comparar", type="primary", use_container_width=True)
-            else:
-                st.warning("No se pudo extraer la fecha automáticamente del Excel")
-                ejecutar_extraccion = False
-            
-            if ejecutar_extraccion:
-                with st.spinner("🌐 Extrayendo datos de Power BI ALMA... Esto puede tomar 1-2 minutos"):
+                # Iniciar extracción automática sin necesidad de botón
+                with st.spinner("🌐 Extrayendo datos de Power BI ALMA automáticamente... Esto puede tomar 1-2 minutos"):
                     resultados = extract_powerbi_data_alma(fecha_extraida)
                     
                     if resultados and (resultados.get('valor_texto') or resultados.get('cantidad_pasos_texto')):
@@ -988,6 +983,8 @@ def main():
                         st.error("Se accedió al reporte pero no se encontraron los valores específicos")
                     else:
                         st.error("No se pudieron extraer datos del reporte Power BI")
+            else:
+                st.warning("No se pudo extraer la fecha automáticamente del Excel - No se puede proceder con Power BI")
         
         else:
             st.error("No se pudieron extraer valores del archivo Excel")
@@ -1012,10 +1009,11 @@ def main():
            - Busca la fecha en la fila 2
            - Busca "TOTAL" y trae el valor a la derecha (1-3 columnas)
            - Busca "NUMERO DE REGISTROS" y trae el valor a la derecha (1-3 columnas)
-        3. **Extracción Power BI**: Navega a la conciliación ALMA de la fecha extraída
-        4. **Comparación**: Compara VALOR A PAGAR A COMERCIO y CANTIDAD DE PASOS
+        3. **Extracción Power BI**: Navega automáticamente a la conciliación ALMA de la fecha extraída
+        4. **Comparación**: Compara automáticamente VALOR A PAGAR A COMERCIO y CANTIDAD DE PASOS
         
         **Mejoras en esta versión:**
+        - ✅ Extracción automática sin botón
         - ✅ Función de valores que funciona correctamente
         - ✅ Función de pasos mejorada que busca específicamente la tarjeta
         - ✅ Extracción robusta de ambos valores del Power BI
