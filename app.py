@@ -943,3 +943,4 @@ if __name__ == "__main__":
 
     st.markdown("---")
     st.markdown('<div class="footer">💻 Desarrollado por Angel Torres | 🚀 Powered by Streamlit | v1.4 ALMA Automatico</div>', unsafe_allow_html=True)
+            
