@@ -1,7 +1,7 @@
 import os
 import sys
 
-# ===== CONFIGURACION CRITICA PARA STREAMLIT CLOUD - MEJORADA =====
+# ===== CONFIGURACIÓN CRÍTICA PARA STREAMLIT CLOUD - MEJORADA =====
 os.environ['STREAMLIT_SERVER_FILE_WATCHER_TYPE'] = 'none'
 os.environ['STREAMLIT_CI'] = 'true'
 os.environ['STREAMLIT_SERVER_HEADLESS'] = 'true'
@@ -38,7 +38,7 @@ import time
 import re
 import tempfile
 
-# Configuracion adicional para Streamlit
+# Configuración adicional para Streamlit
 st.set_page_config(
     page_title="Validador Power BI - APP ALMA",
     page_icon="💳",
@@ -84,7 +84,7 @@ st.markdown("""
     color: black !important;
 }
 
-/* ===== Boton de expandir/cerrar sidebar ===== */
+/* ===== Botón de expandir/cerrar sidebar ===== */
 [data-testid="stSidebarNav"] button {
     background: #2E2E3E !important;
     color: white !important;
@@ -107,7 +107,7 @@ st.markdown("""
     padding: 5px !important;
 }
 
-/* ===== BOTON "BROWSE FILES" ===== */
+/* ===== BOTÓN "BROWSE FILES" ===== */
 [data-testid="stSidebar"] .uppy-Dashboard-AddFiles-list button {
     color: black !important;
     background-color: #f0f0f0 !important;
@@ -155,19 +155,21 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ===== FUNCIONES DE EXTRACCION DE EXCEL (ALMA) =====
+# ===== FUNCIONES DE EXTRACCIÓN DE EXCEL (ALMA) =====
 
 def extract_date_from_excel(df):
     """Extraer fecha de la fila 2 del Excel formato 'REPORTE IP/REV 24 DE SEPTIEMBRE DEL 2025'
        Devuelve fecha en formato YYYY-MM-DD o None.
     """
     try:
+        # fila 2 = índice 1
         if df.shape[0] < 2:
             return None
         fila_2 = df.iloc[1]
         for celda in fila_2:
             if pd.notna(celda) and isinstance(celda, str):
                 texto = celda.upper()
+                # Buscar patrón día DE MES DEL YYYY
                 patron = r'(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚÑ]+)\s+DEL\s+(\d{4})'
                 match = re.search(patron, texto)
                 if match:
@@ -189,20 +191,27 @@ def extract_date_from_excel(df):
 def _parse_currency_to_float(value):
     """Parsea un string tipo '$12.345.678,90' o '12.345.678,90' a float 12345678.9"""
     try:
+        # VERIFICAR SI ES NaN PRIMERO
         if value is None or (isinstance(value, (float, np.floating)) and pd.isna(value)):
             return None
         if isinstance(value, (int, float, np.integer, np.floating)):
             return float(value)
         s = str(value).strip()
+        # eliminar espacios y símbolos
         s = s.replace(' ', '').replace('\xa0', '')
+        # si tiene $ o COP, quitarlo
         s = re.sub(r'[^\d,.-]', '', s)
+        # Si hay tanto punto como coma, asumimos que punto es separador de miles
         if '.' in s and ',' in s:
             s = s.replace('.', '').replace(',', '.')
         else:
+            # si sólo tiene puntos y más de 1 punto, quitar puntos (miles)
             if s.count('.') > 1:
                 s = s.replace('.', '')
+            # si sólo tiene coma como decimal
             if ',' in s and s.count(',') == 1:
                 s = s.replace(',', '.')
+            # si tiene coma múltiples, quitar comas
             if s.count(',') > 1:
                 s = s.replace(',', '')
         if s == '' or s == '-':
@@ -212,16 +221,24 @@ def _parse_currency_to_float(value):
         return None
 
 def extract_excel_values_alma(uploaded_file):
-    """Extraer TOTAL y NUMERO DE REGISTROS del Excel unico de ALMA"""
+    """Extraer TOTAL y NUMERO DE REGISTROS del Excel único de ALMA
+       Retorna (valor_total, numero_registros, fecha) donde:
+         - valor_total: float (o None)
+         - numero_registros: int (o None)
+         - fecha: 'YYYY-MM-DD' (o None)
+    """
     try:
+        # Leer la hoja 0 sin encabezados
         df = pd.read_excel(uploaded_file, sheet_name=0, header=None)
         fecha = extract_date_from_excel(df)
         valor_total = None
         numero_registros = None
 
+        # Normalizar texto de búsqueda
         rows = df.values.tolist()
 
         for i, row in enumerate(rows):
+            # construir versión en mayúsculas para búsquedas
             fila_textos = []
             for v in row:
                 if pd.isna(v):
@@ -229,12 +246,16 @@ def extract_excel_values_alma(uploaded_file):
                 else:
                     fila_textos.append(str(v).upper())
 
+            # Si fila contiene 'TOTAL' buscar valor en columnas a la derecha
             if any('TOTAL' in t for t in fila_textos):
+                # buscar valor numérico en la misma fila: derecha 1..3 columnas
                 for offset in range(1, 4):
                     for j, cell in enumerate(row):
                         if pd.isna(cell):
                             continue
+                        # Si la celda actual (j) contiene TOTAL (chequeamos en fila_textos)
                         if 'TOTAL' in fila_textos[j]:
+                            # comprobar j+offset
                             right_idx = j + offset
                             if right_idx < len(row):
                                 candidato = row[right_idx]
@@ -245,6 +266,7 @@ def extract_excel_values_alma(uploaded_file):
                     if valor_total is not None:
                         break
 
+            # Si fila contiene 'REGISTRO' (o variantes) buscar número de registros
             if any('REGISTRO' in t or 'REGISTROS' in t or 'NUMERO' in t or 'N°' in t for t in fila_textos):
                 for offset in range(1, 4):
                     for j, cell in enumerate(row):
@@ -254,16 +276,21 @@ def extract_excel_values_alma(uploaded_file):
                             right_idx = j + offset
                             if right_idx < len(row):
                                 candidato = row[right_idx]
+                                # VERIFICAR SI ES NaN ANTES DE CONVERTIR
                                 if pd.isna(candidato):
                                     continue
+                                # limpiar y convertir a int si es posible
                                 if isinstance(candidato, (int, np.integer)):
                                     numero_registros = int(candidato)
                                     break
+                                # si viene como float convertible (y no es NaN)
                                 if isinstance(candidato, (float, np.floating)):
+                                    # VERIFICAR EXPLÍCITAMENTE QUE NO SEA NaN
                                     if pd.isna(candidato):
                                         continue
                                     numero_registros = int(candidato)
                                     break
+                                # si viene como string con separadores
                                 cand_str = str(candidato).replace('.', '').replace(',', '').strip()
                                 if cand_str.isdigit():
                                     numero_registros = int(cand_str)
@@ -271,16 +298,21 @@ def extract_excel_values_alma(uploaded_file):
                     if numero_registros is not None:
                         break
 
+            # si ambos encontrados, salir
             if valor_total is not None and numero_registros is not None:
                 break
 
+        # Caso especial: si no se encontró valor_total buscando 'TOTAL', buscar en últimas filas
         if valor_total is None:
+            # inspeccionar últimas filas por una celda que parezca moneda
             for r in rows[-6:]:
                 for candidate in r:
+                    # VERIFICAR SI ES NaN ANTES DE PROCESAR
                     if pd.isna(candidate):
                         continue
                     val = _parse_currency_to_float(candidate)
                     if val is not None:
+                        # asumimos el primer candidato encontrado en las últimas filas es el total
                         valor_total = val
                         break
                 if valor_total is not None:
@@ -292,7 +324,7 @@ def extract_excel_values_alma(uploaded_file):
         st.error(f"Error procesando archivo Excel: {str(e)}")
         return None, None, None
 
-# ===== FUNCIONES DE EXTRACCION DE POWER BI (ALMA) =====
+# ===== FUNCIONES DE EXTRACCIÓN DE POWER BI (ALMA) =====
 
 def setup_driver():
     """Configurar ChromeDriver para Selenium"""
@@ -319,17 +351,20 @@ def setup_driver():
             return None
             
     except Exception as e:
-        st.error(f"Error critico al configurar ChromeDriver: {e}")
+        st.error(f"Error crítico al configurar ChromeDriver: {e}")
         return None
 
 def click_conciliacion_alma(driver, fecha_objetivo):
-    """Hacer clic en la conciliacion ALMA especifica por fecha formato YYYY-MM-DD"""
+    """Hacer clic en la conciliación ALMA específica por fecha formato YYYY-MM-DD"""
     try:
+        # Convertir fecha a diferentes formatos que podrían aparecer en Power BI
         fecha_partes = fecha_objetivo.split('-')
         anio = fecha_partes[0]
         mes_num = fecha_partes[1]
         dia = fecha_partes[2]
         
+        # Formato que viste en Power BI: "ConciliaciónALMAdel2025−10−0900:00al2025−10−0911:59"
+        # Nota: Los guiones pueden ser diferentes (unicode)
         formatos_especificos = [
             f"ConciliaciónALMAdel{anio}−{mes_num}−{dia}00:00al{anio}−{mes_num}−{dia}11:59",
             f"Conciliación ALMA del {anio}-{mes_num}-{dia} 00:00 al {anio}-{mes_num}-{dia} 11:59",
@@ -341,42 +376,48 @@ def click_conciliacion_alma(driver, fecha_objetivo):
         
         elemento_conciliacion = None
         
+        # Primero buscar por el formato específico que viste
         for formato in formatos_especificos:
             try:
-                formato_busqueda = formato.replace('−', '-')
+                # Reemplazar guiones especiales por guiones normales para la búsqueda
+                formato_busqueda = formato.replace('−', '-')  # guión especial a normal
                 selector = f"//*[contains(text(), '{formato_busqueda}')]"
                 elementos = driver.find_elements(By.XPATH, selector)
                 
                 for elemento in elementos:
                     if elemento.is_displayed():
                         elemento_conciliacion = elemento
-                        st.success(f"✅ Encontrada conciliacion con formato especifico: {elemento.text}")
+                        st.success(f"✅ Encontrada conciliación con formato específico: {elemento.text}")
                         break
                 if elemento_conciliacion:
                     break
             except Exception as e:
                 continue
         
+        # Si no se encuentra con formatos específicos, buscar por partes
         if not elemento_conciliacion:
+            # Buscar elementos que contengan ALMA y la fecha
             try:
                 elementos_alma = driver.find_elements(By.XPATH, "//*[contains(text(), 'ALMA') or contains(text(), 'Alma')]")
                 
                 for elemento in elementos_alma:
                     if elemento.is_displayed():
                         texto_elemento = elemento.text
+                        # Verificar si contiene la fecha en cualquier formato
                         if (f"{anio}-{mes_num}-{dia}" in texto_elemento or 
                             f"{anio}−{mes_num}−{dia}" in texto_elemento or
                             f"{dia}/{mes_num}/{anio}" in texto_elemento):
                             elemento_conciliacion = elemento
-                            st.success(f"✅ Encontrada conciliacion por partes: {texto_elemento}")
+                            st.success(f"✅ Encontrada conciliación por partes: {texto_elemento}")
                             break
             except Exception as e:
-                st.warning(f"Busqueda por partes no exitosa: {e}")
+                st.warning(f"Búsqueda por partes no exitosa: {e}")
         
+        # Si aún no se encuentra, buscar cualquier elemento con la fecha completa
         if not elemento_conciliacion:
             patrones_fecha = [
                 f"{anio}-{mes_num}-{dia}",
-                f"{anio}−{mes_num}−{dia}",
+                f"{anio}−{mes_num}−{dia}",  # guión especial
                 f"{dia}/{mes_num}/{anio}",
             ]
             
@@ -386,6 +427,7 @@ def click_conciliacion_alma(driver, fecha_objetivo):
                     elementos = driver.find_elements(By.XPATH, selector)
                     for elemento in elementos:
                         if elemento.is_displayed():
+                            # Verificar que también contenga "ALMA" o "Conciliación"
                             texto_elemento = elemento.text.upper()
                             if 'ALMA' in texto_elemento or 'CONCILIACIÓN' in texto_elemento:
                                 elemento_conciliacion = elemento
@@ -396,6 +438,7 @@ def click_conciliacion_alma(driver, fecha_objetivo):
                 except:
                     continue
         
+        # Último intento: buscar cualquier elemento con ALMA
         if not elemento_conciliacion:
             try:
                 elementos_alma = driver.find_elements(By.XPATH, "//*[contains(text(), 'ALMA') or contains(text(), 'Alma')]")
@@ -408,12 +451,14 @@ def click_conciliacion_alma(driver, fecha_objetivo):
                 pass
         
         if elemento_conciliacion:
+            # Hacer scroll y clic
             driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", elemento_conciliacion)
             time.sleep(2)
             
+            # Intentar diferentes métodos de clic
             try:
                 elemento_conciliacion.click()
-                st.success("✅ Clic realizado con exito")
+                st.success("✅ Clic realizado con éxito")
             except Exception as e:
                 try:
                     driver.execute_script("arguments[0].click();", elemento_conciliacion)
@@ -428,11 +473,12 @@ def click_conciliacion_alma(driver, fecha_objetivo):
                         st.error(f"❌ No se pudo hacer clic: {e3}")
                         return False
             
-            time.sleep(5)
+            time.sleep(5)  # Esperar a que cargue
             return True
         else:
-            st.error(f"❌ No se encontro la conciliacion para la fecha {fecha_objetivo}")
-            st.info("🔍 Elementos disponibles en la pagina que contienen 'ALMA':")
+            # Debug: mostrar qué elementos hay disponibles
+            st.error(f"❌ No se encontró la conciliación para la fecha {fecha_objetivo}")
+            st.info("🔍 Elementos disponibles en la página que contienen 'ALMA':")
             try:
                 elementos_texto = driver.find_elements(By.XPATH, "//*[text()]")
                 textos_alma = []
@@ -443,7 +489,7 @@ def click_conciliacion_alma(driver, fecha_objetivo):
                             textos_alma.append(texto)
                 
                 if textos_alma:
-                    for texto in textos_alma[:10]:
+                    for texto in textos_alma[:10]:  # Mostrar primeros 10
                         st.write(f"• {texto}")
                 else:
                     st.write("No se encontraron elementos con 'ALMA' o 'CONCILIACIÓN'")
@@ -454,54 +500,64 @@ def click_conciliacion_alma(driver, fecha_objetivo):
             return False
             
     except Exception as e:
-        st.error(f"❌ Error al hacer clic en conciliacion: {str(e)}")
+        st.error(f"❌ Error al hacer clic en conciliación: {str(e)}")
         return False
 
 def find_valor_a_pagar_alma(driver):
-    """Buscar 'VALOR A PAGAR A COMERCIO' en Power BI ALMA"""
+    """Buscar 'VALOR A PAGAR A COMERCIO' en Power BI ALMA - VERSIÓN CORREGIDA"""
     try:
+        # Buscar en todos los elementos de texto
         elementos = driver.find_elements(By.XPATH, "//*[text()]")
         
         for elemento in elementos:
             if elemento.is_displayed():
                 texto = elemento.text.strip()
                 
+                # Buscar el patrón que contiene ambos valores juntos
                 if 'VALOR A PAGAR A COMERCIO' in texto and 'CANTIDADPASOS' in texto:
                     st.info(f"📝 Texto completo encontrado: '{texto}'")
                     
+                    # Extraer el valor numérico usando regex - buscar número después de "VALOR A PAGAR A COMERCIO"
+                    # Patrón: busca cualquier número con comas después del texto del valor
                     patron_valor = r'VALOR A PAGAR A COMERCIO[^\d]*([\d,]+)'
                     match_valor = re.search(patron_valor, texto)
                     
                     if match_valor:
                         valor_extraido = match_valor.group(1)
-                        st.success(f"✅ Valor extraido correctamente: {valor_extraido}")
+                        st.success(f"✅ Valor extraído correctamente: {valor_extraido}")
                         return valor_extraido
                     
+                    # Si no funciona el primer patrón, intentar otro enfoque
                     patron_valor_alt = r'VALOR A PAGAR A COMERCIO.*?(\d{1,3}(?:,\d{3})*)'
                     match_valor_alt = re.search(patron_valor_alt, texto)
                     
                     if match_valor_alt:
                         valor_extraido = match_valor_alt.group(1)
-                        st.success(f"✅ Valor extraido (alternativo): {valor_extraido}")
+                        st.success(f"✅ Valor extraído (alternativo): {valor_extraido}")
                         return valor_extraido
         
-        st.warning("No se encontro el texto combinado, buscando por separado...")
+        # Si no se encuentra el texto combinado, buscar por separado
+        st.warning("No se encontró el texto combinado, buscando por separado...")
         
+        # Buscar elementos que contengan el valor numérico grande (probablemente el total)
         elementos_numericos = driver.find_elements(By.XPATH, "//*[text()]")
         for elemento in elementos_numericos:
             if elemento.is_displayed():
                 texto = elemento.text.strip()
+                # Buscar números grandes con formato de moneda
                 if texto and re.match(r'^\$?[\d,]+$', texto.replace(' ', '')):
+                    # Verificar que sea un número razonable para un pago
                     numero_limpio = texto.replace('$', '').replace(',', '').replace(' ', '')
                     if numero_limpio.isdigit():
                         valor_num = int(numero_limpio)
-                        if 1000000 <= valor_num <= 50000000:
+                        if 1000000 <= valor_num <= 50000000:  # Rango razonable para pagos
                             st.success(f"💰 Valor candidato encontrado: {texto}")
+                            # Extraer solo los números sin el símbolo $
                             match = re.search(r'([\d,]+)', texto)
                             if match:
                                 return match.group(1)
         
-        st.error("No se pudo encontrar el valor numerico")
+        st.error("No se pudo encontrar el valor numérico")
         return None
         
     except Exception as e:
@@ -511,6 +567,7 @@ def find_valor_a_pagar_alma(driver):
 def find_cantidad_pasos_alma(driver):
     """Buscar la tarjeta/table 'CANTIDAD PASOS' a la derecha de 'VALOR A PAGAR A COMERCIO'"""
     try:
+        # Buscar por diferentes patrones del título - MÁS ESPECÍFICO
         titulo_selectors = [
             "//*[contains(text(), 'CANTIDAD PASOS')]",
             "//*[contains(text(), 'Cantidad Pasos')]",
@@ -530,7 +587,7 @@ def find_cantidad_pasos_alma(driver):
                         texto = elemento.text.strip()
                         if any(palabra in texto.upper() for palabra in ['CANTIDAD', 'PASOS']):
                             titulo_element = elemento
-                            st.success(f"✅ Titulo encontrado: {texto}")
+                            st.success(f"✅ Título encontrado: {texto}")
                             break
                 if titulo_element:
                     break
@@ -538,29 +595,36 @@ def find_cantidad_pasos_alma(driver):
                 continue
         
         if not titulo_element:
-            st.warning("❌ No se encontro el titulo 'CANTIDAD PASOS'")
+            st.warning("❌ No se encontró el título 'CANTIDAD PASOS'")
             return None
         
+        # ESTRATEGIA MEJORADA: Buscar en el mismo contenedor o contenedores cercanos
         try:
+            # Buscar en el contenedor padre
             container = titulo_element.find_element(By.XPATH, "./..")
+            
+            # Buscar TODOS los elementos numéricos en el contenedor
             all_elements = container.find_elements(By.XPATH, ".//*")
             
             for elem in all_elements:
                 texto = elem.text.strip()
+                # Verificar si es un número (contiene dígitos pero no texto largo)
                 if (texto and 
                     any(char.isdigit() for char in texto) and 
                     len(texto) < 20 and 
                     texto != titulo_element.text and
                     not any(word in texto.upper() for word in ['TOTAL', 'VALOR', 'PAGAR', 'COMERCIO', 'CANTIDAD', 'PASOS'])):
                     
+                    # Verificar formato numérico (puede tener comas, puntos, pero ser principalmente números)
                     digit_count = sum(char.isdigit() for char in texto)
-                    if digit_count >= 1:
-                        st.success(f"✅ Valor numerico encontrado: {texto}")
+                    if digit_count >= 1:  # Al menos un dígito
+                        st.success(f"✅ Valor numérico encontrado: {texto}")
                         return texto
                         
         except Exception as e:
-            st.warning(f"⚠️ Estrategia 1 fallo: {e}")
+            st.warning(f"⚠️ Estrategia 1 falló: {e}")
         
+        # ESTRATEGIA 2: Buscar elementos hermanos específicamente
         try:
             parent = titulo_element.find_element(By.XPATH, "./..")
             siblings = parent.find_elements(By.XPATH, "./*")
@@ -578,12 +642,14 @@ def find_cantidad_pasos_alma(driver):
                             st.success(f"✅ Valor encontrado en hermano: {texto}")
                             return texto
         except Exception as e:
-            st.warning(f"⚠️ Estrategia 2 fallo: {e}")
+            st.warning(f"⚠️ Estrategia 2 falló: {e}")
         
+        # ESTRATEGIA 3: Buscar elementos que siguen al título
         try:
+            # Buscar elementos que están después del título
             following_elements = driver.find_elements(By.XPATH, f"//*[contains(text(), 'CANTIDAD PASOS')]/following::*")
             
-            for i, elem in enumerate(following_elements[:20]):
+            for i, elem in enumerate(following_elements[:20]):  # Buscar en los primeros 20 elementos siguientes
                 texto = elem.text.strip()
                 if (texto and 
                     any(char.isdigit() for char in texto) and 
@@ -595,12 +661,16 @@ def find_cantidad_pasos_alma(driver):
                         st.success(f"✅ Valor encontrado en elemento siguiente: {texto}")
                         return texto
         except Exception as e:
-            st.warning(f"⚠️ Estrategia 3 fallo: {e}")
+            st.warning(f"⚠️ Estrategia 3 falló: {e}")
         
+        # ESTRATEGIA 4: Buscar cerca de "VALOR A PAGAR A COMERCIO"
         try:
+            # Encontrar "VALOR A PAGAR A COMERCIO" primero
             valor_element = driver.find_element(By.XPATH, "//*[contains(text(), 'VALOR A PAGAR A COMERCIO')]")
             if valor_element:
+                # Buscar elementos a la derecha o cerca
                 container_valor = valor_element.find_element(By.XPATH, "./..")
+                # Buscar en el mismo nivel jerárquico
                 all_nearby = container_valor.find_elements(By.XPATH, ".//*")
                 
                 for elem in all_nearby:
@@ -609,6 +679,7 @@ def find_cantidad_pasos_alma(driver):
                         any(char.isdigit() for char in texto) and 
                         len(texto) < 20 and
                         'CANTIDAD' in texto.upper() and 'PASOS' in texto.upper()):
+                        # Este es el título, buscar el siguiente elemento numérico
                         continue
                     
                     if (texto and 
@@ -621,9 +692,9 @@ def find_cantidad_pasos_alma(driver):
                             st.success(f"✅ Valor encontrado cerca de VALOR A PAGAR: {texto}")
                             return texto
         except Exception as e:
-            st.warning(f"⚠️ Estrategia 4 fallo: {e}")
+            st.warning(f"⚠️ Estrategia 4 falló: {e}")
         
-        st.error("❌ No se pudo encontrar el valor numerico de CANTIDAD PASOS")
+        st.error("❌ No se pudo encontrar el valor numérico de CANTIDAD PASOS")
         return None
         
     except Exception as e:
@@ -631,7 +702,7 @@ def find_cantidad_pasos_alma(driver):
         return None
 
 def extract_powerbi_data_alma(fecha_objetivo):
-    """Funcion principal para extraer datos de Power BI ALMA"""
+    """Función principal para extraer datos de Power BI ALMA"""
     
     REPORT_URL = "https://app.powerbi.com/view?r=eyJrIjoiMWExM2JkMzctMDgyMi00ZWZhLTgxODUtNGNlZGViYTcyM2NiIiwidCI6ImY5MTdlZDFiLWI0MDMtNDljNS1iODBiLWJhYWUzY2UwMzc1YSJ9"
     
@@ -640,24 +711,28 @@ def extract_powerbi_data_alma(fecha_objetivo):
         return None
     
     try:
+        # Navegar al reporte
         with st.spinner("🌐 Conectando con Power BI ALMA..."):
             driver.get(REPORT_URL)
-            time.sleep(12)
+            time.sleep(12)  # Más tiempo para carga inicial
         
-        st.info("📊 Pagina de Power BI cargada")
+        st.info("📊 Página de Power BI cargada")
         driver.save_screenshot("powerbi_alma_inicial.png")
         
-        with st.spinner("🔍 Buscando conciliacion..."):
+        # Hacer clic en la conciliación específica
+        with st.spinner("🔍 Buscando conciliación..."):
             if not click_conciliacion_alma(driver, fecha_objetivo):
                 return None
         
         time.sleep(5)
         driver.save_screenshot("powerbi_alma_despues_seleccion.png")
-        st.success("✅ Conciliacion seleccionada")
+        st.success("✅ Conciliación seleccionada")
         
+        # Buscar VALOR A PAGAR A COMERCIO
         with st.spinner("💰 Buscando valor a pagar..."):
             valor_texto = find_valor_a_pagar_alma(driver)
         
+        # Buscar CANTIDAD DE PASOS
         with st.spinner("👣 Buscando cantidad de pasos..."):
             cantidad_pasos_texto = find_cantidad_pasos_alma(driver)
         
@@ -674,7 +749,7 @@ def extract_powerbi_data_alma(fecha_objetivo):
         }
         
     except Exception as e:
-        st.error(f"Error durante la extraccion: {str(e)}")
+        st.error(f"Error durante la extracción: {str(e)}")
         import traceback
         st.error(f"Detalle del error: {traceback.format_exc()}")
         return None
@@ -684,7 +759,7 @@ def extract_powerbi_data_alma(fecha_objetivo):
         except:
             pass
 
-# ===== FUNCIONES DE COMPARACION =====
+# ===== FUNCIONES DE COMPARACIÓN =====
 
 def convert_currency_to_float(currency_string):
     """Convierte string de moneda a float"""
@@ -693,13 +768,10 @@ def convert_currency_to_float(currency_string):
             return float(currency_string)
             
         if isinstance(currency_string, str):
-            cleaned = currency_string.strip()
-            cleaned = cleaned.replace(', '')
-            cleaned = cleaned.replace(' ', '')
+            cleaned = currency_string.strip().replace('$', '').replace(' ', '')
             
             if '.' in cleaned and ',' in cleaned:
-                cleaned = cleaned.replace('.', '')
-                cleaned = cleaned.replace(',', '.')
+                cleaned = cleaned.replace('.', '').replace(',', '.')
             elif '.' in cleaned and cleaned.count('.') > 1:
                 cleaned = cleaned.replace('.', '')
             elif ',' in cleaned:
@@ -760,22 +832,25 @@ def main():
     st.title("💳 Validador Power BI - Conciliaciones APP ALMA")
     st.markdown("---")
     
-    st.sidebar.header("📋 Informacion del Reporte")
+    # Información del reporte
+    st.sidebar.header("📋 Información del Reporte")
     st.sidebar.info("""
     **Objetivo:**
     - Cargar archivo Excel de ALMA
     - Extraer fecha, TOTAL y NUMERO DE REGISTROS
-    - Comparar con Power BI automaticamente
+    - Comparar con Power BI automáticamente
     
     **Estado:** ✅ ChromeDriver Compatible
-    **Version:** v1.4 - ALMA Automatico
+    **Versión:** v1.3 - ALMA Mejorado
     """)
     
+    # Estado del sistema
     st.sidebar.header("🛠️ Estado del Sistema")
     st.sidebar.success(f"✅ Python {sys.version_info.major}.{sys.version_info.minor}")
     st.sidebar.info(f"✅ Pandas {pd.__version__}")
     st.sidebar.info(f"✅ Streamlit {st.__version__}")
     
+    # Cargar archivo Excel
     st.subheader("📁 Cargar Archivo Excel")
     uploaded_file = st.file_uploader(
         "Selecciona el archivo Excel de ALMA", 
@@ -783,12 +858,14 @@ def main():
     )
     
     if uploaded_file is not None:
+        # Extraer valores del Excel
         with st.spinner("📊 Procesando archivo Excel..."):
             valor_total, numero_registros, fecha_extraida = extract_excel_values_alma(uploaded_file)
         
         if valor_total is not None and numero_registros is not None:
             
-            st.markdown("### 📊 Valores Extraidos del Excel")
+            # Mostrar valores extraídos del Excel
+            st.markdown("### 📊 Valores Extraídos del Excel")
             
             col1, col2, col3 = st.columns(3)
             
@@ -796,7 +873,7 @@ def main():
                 st.metric("TOTAL", f"${valor_total:,.0f}".replace(",", "."))
             
             with col2:
-                st.metric("NUMERO DE REGISTROS", f"{numero_registros:,}".replace(",", "."))
+                st.metric("NÚMERO DE REGISTROS", f"{numero_registros:,}".replace(",", "."))
             
             with col3:
                 if fecha_extraida:
@@ -806,10 +883,11 @@ def main():
             
             st.markdown("---")
             
+            # Extraer de Power BI
             if fecha_extraida:
-                ejecutar_extraccion = True
+                ejecutar_extraccion = st.button("🎯 Extraer de Power BI y Comparar", type="primary", use_container_width=True)
             else:
-                st.warning("No se pudo extraer la fecha automaticamente del Excel")
+                st.warning("No se pudo extraer la fecha automáticamente del Excel")
                 ejecutar_extraccion = False
             
             if ejecutar_extraccion:
@@ -822,7 +900,8 @@ def main():
                         
                         st.markdown("---")
                         
-                        st.markdown("### 📊 Valores Extraidos de Power BI")
+                        # Mostrar valores de Power BI
+                        st.markdown("### 📊 Valores Extraídos de Power BI")
                         
                         col1, col2 = st.columns(2)
                         
@@ -840,8 +919,9 @@ def main():
                         
                         st.markdown("---")
                         
+                        # Comparación de Valores
                         if valor_powerbi_texto:
-                            st.markdown("### 💰 Validacion: Valores")
+                            st.markdown("### 💰 Validación: Valores")
                             
                             powerbi_valor, excel_valor, valor_formateado, coinciden_valor, dif_valor = compare_values_alma(
                                 valor_powerbi_texto, valor_total
@@ -863,8 +943,9 @@ def main():
                                         st.error("DIFERENCIA")
                                         st.caption(f"${dif_valor:,.0f}".replace(",", "."))
                         
+                        # Comparación de Pasos
                         if cantidad_pasos_powerbi:
-                            st.markdown("### 👣 Validacion: Numero de Registros/Pasos")
+                            st.markdown("### 👣 Validación: Número de Registros/Pasos")
                             
                             powerbi_pasos, excel_pasos, pasos_formateado, coinciden_pasos, dif_pasos = compare_pasos_alma(
                                 cantidad_pasos_powerbi, numero_registros
@@ -887,23 +968,24 @@ def main():
                         
                         st.markdown("---")
                         
+                        # Resultado Final
                         st.markdown("### 📋 Resultado Final")
                         
                         if valor_powerbi_texto and cantidad_pasos_powerbi:
                             if coinciden_valor and coinciden_pasos:
-                                st.success("🎉 VALIDACION EXITOSA - Valores y pasos coinciden")
+                                st.success("🎉 VALIDACIÓN EXITOSA - Valores y pasos coinciden")
                                 st.balloons()
                             elif coinciden_valor and not coinciden_pasos:
-                                st.warning("⚠️ VALIDACION PARCIAL - Valores coinciden, pero hay diferencias en pasos")
+                                st.warning("⚠️ VALIDACIÓN PARCIAL - Valores coinciden, pero hay diferencias en pasos")
                             elif not coinciden_valor and coinciden_pasos:
-                                st.warning("⚠️ VALIDACION PARCIAL - Pasos coinciden, pero hay diferencias en valores")
+                                st.warning("⚠️ VALIDACIÓN PARCIAL - Pasos coinciden, pero hay diferencias en valores")
                             else:
-                                st.error("❌ VALIDACION FALLIDA - Existen diferencias en valores y pasos")
+                                st.error("❌ VALIDACIÓN FALLIDA - Existen diferencias en valores y pasos")
                         else:
-                            st.warning("⚠️ VALIDACION INCOMPLETA - No se pudieron extraer todos los datos de Power BI")
+                            st.warning("⚠️ VALIDACIÓN INCOMPLETA - No se pudieron extraer todos los datos de Power BI")
                     
                     elif resultados:
-                        st.error("Se accedio al reporte pero no se encontraron los valores especificos")
+                        st.error("Se accedió al reporte pero no se encontraron los valores específicos")
                     else:
                         st.error("No se pudieron extraer datos del reporte Power BI")
         
@@ -911,36 +993,37 @@ def main():
             st.error("No se pudieron extraer valores del archivo Excel")
             with st.expander("💡 Sugerencias para solucionar el problema"):
                 st.markdown("""
-                - Verifica que el Excel sea de ALMA y tenga una unica hoja
-                - Asegurate que la fila 2 contenga el texto con la fecha (ej: "REPORTE IP/REV 24 DE SEPTIEMBRE DEL 2025")
-                - El archivo debe contener las palabras "TOTAL" y "NUMERO DE REGISTROS" o que en sus ultimas filas aparezcan el total y el conteo.
+                - Verifica que el Excel sea de ALMA y tenga una única hoja
+                - Asegúrate que la fila 2 contenga el texto con la fecha (ej: "REPORTE IP/REV 24 DE SEPTIEMBRE DEL 2025")
+                - El archivo debe contener las palabras "TOTAL" y "NUMERO DE REGISTROS" o que en sus últimas filas aparezcan el total y el conteo.
                 - Los valores pueden estar 1 o 2 columnas a la derecha de la etiqueta.
                 """)
     
     else:
-        st.info("📁 Por favor, carga un archivo Excel para comenzar la validacion automatica")
+        st.info("📁 Por favor, carga un archivo Excel para comenzar la validación")
 
+    # Información de ayuda
     st.markdown("---")
     with st.expander("ℹ️ Instrucciones de Uso"):
         st.markdown("""
-        **Proceso Automatico:**
-        1. **Cargar Excel**: Archivo ALMA con una unica hoja
-        2. **Extraccion automatica**: 
+        **Proceso:**
+        1. **Cargar Excel**: Archivo ALMA con una única hoja
+        2. **Extracción automática**: 
            - Busca la fecha en la fila 2
            - Busca "TOTAL" y trae el valor a la derecha (1-3 columnas)
            - Busca "NUMERO DE REGISTROS" y trae el valor a la derecha (1-3 columnas)
-        3. **Extraccion Power BI**: Navega automaticamente a la conciliacion ALMA de la fecha extraida
-        4. **Comparacion**: Compara automaticamente VALOR A PAGAR A COMERCIO y CANTIDAD DE PASOS
+        3. **Extracción Power BI**: Navega a la conciliación ALMA de la fecha extraída
+        4. **Comparación**: Compara VALOR A PAGAR A COMERCIO y CANTIDAD DE PASOS
         
-        **Mejoras en esta version:**
-        - ✅ Extraccion automatica al cargar el archivo
-        - ✅ Sin necesidad de hacer clic en botones
-        - ✅ Proceso completamente automatizado
+        **Mejoras en esta versión:**
+        - ✅ Función de valores que funciona correctamente
+        - ✅ Función de pasos mejorada que busca específicamente la tarjeta
+        - ✅ Extracción robusta de ambos valores del Power BI
         """)
 
 if __name__ == "__main__":
     main()
 
+    # Footer
     st.markdown("---")
-    st.markdown('<div class="footer">💻 Desarrollado por Angel Torres | 🚀 Powered by Streamlit | v1.4 ALMA Automatico</div>', unsafe_allow_html=True)
-            
+    st.markdown('<div class="footer">💻 Desarrollado por Angel Torres | 🚀 Powered by Streamlit | v1.3 ALMA Mejorado</div>', unsafe_allow_html=True)
