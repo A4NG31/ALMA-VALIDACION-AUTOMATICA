@@ -768,7 +768,265 @@ def convert_currency_to_float(currency_string):
             return float(currency_string)
             
         if isinstance(currency_string, str):
-            cleaned = currency_string.strip().replace(', '').replace(' ', '')
+            cleaned = currency_string.strip().replace('
+            
+            if '.' in cleaned and ',' in cleaned:
+                cleaned = cleaned.replace('.', '').replace(',', '.')
+            elif '.' in cleaned and cleaned.count('.') > 1:
+                cleaned = cleaned.replace('.', '')
+            elif ',' in cleaned:
+                if cleaned.count(',') == 2 and '.' in cleaned:
+                    cleaned = cleaned.replace(',', '')
+                elif cleaned.count(',') == 1:
+                    cleaned = cleaned.replace(',', '.')
+                else:
+                    cleaned = cleaned.replace(',', '')
+            
+            return float(cleaned) if cleaned else 0.0
+            
+        return float(currency_string)
+        
+    except Exception as e:
+        st.error(f"Error convirtiendo moneda: '{currency_string}' - {e}")
+        return 0.0
+
+def compare_values_alma(valor_powerbi, valor_excel):
+    """Comparar valores de Power BI y Excel"""
+    try:
+        powerbi_numero = convert_currency_to_float(valor_powerbi)
+        excel_numero = float(valor_excel) if valor_excel else 0
+        
+        tolerancia = 0.01
+        coinciden = abs(powerbi_numero - excel_numero) <= tolerancia
+        diferencia = abs(powerbi_numero - excel_numero)
+        
+        return powerbi_numero, excel_numero, str(valor_powerbi), coinciden, diferencia
+        
+    except Exception as e:
+        st.error(f"Error comparando valores: {e}")
+        return None, None, str(valor_powerbi), False, 0
+
+def compare_pasos_alma(pasos_powerbi, pasos_excel):
+    """Comparar pasos de Power BI y Excel"""
+    try:
+        if isinstance(pasos_powerbi, str):
+            pasos_powerbi_limpio = re.sub(r'[^\d]', '', pasos_powerbi)
+            powerbi_numero = int(pasos_powerbi_limpio) if pasos_powerbi_limpio else 0
+        else:
+            powerbi_numero = int(pasos_powerbi) if pasos_powerbi else 0
+        
+        excel_numero = int(pasos_excel) if pasos_excel else 0
+        
+        coinciden = powerbi_numero == excel_numero
+        diferencia = abs(powerbi_numero - excel_numero)
+        
+        return powerbi_numero, excel_numero, str(pasos_powerbi), coinciden, diferencia
+        
+    except Exception as e:
+        st.error(f"Error comparando pasos: {e}")
+        return 0, 0, str(pasos_powerbi), False, 0
+
+# ===== INTERFAZ PRINCIPAL =====
+
+def main():
+    st.title("💳 Validador Power BI - Conciliaciones APP ALMA")
+    st.markdown("---")
+    
+    # Información del reporte
+    st.sidebar.header("📋 Información del Reporte")
+    st.sidebar.info("""
+    **Objetivo:**
+    - Cargar archivo Excel de ALMA
+    - Extraer fecha, TOTAL y NUMERO DE REGISTROS
+    - Comparar con Power BI automáticamente
+    
+    **Estado:** ✅ ChromeDriver Compatible
+    **Versión:** v1.4 - ALMA Automático
+    """)
+    
+    # Estado del sistema
+    st.sidebar.header("🛠️ Estado del Sistema")
+    st.sidebar.success(f"✅ Python {sys.version_info.major}.{sys.version_info.minor}")
+    st.sidebar.info(f"✅ Pandas {pd.__version__}")
+    st.sidebar.info(f"✅ Streamlit {st.__version__}")
+    
+    # Cargar archivo Excel
+    st.subheader("📁 Cargar Archivo Excel")
+    uploaded_file = st.file_uploader(
+        "Selecciona el archivo Excel de ALMA", 
+        type=['xlsx', 'xls']
+    )
+    
+    if uploaded_file is not None:
+        # Extraer valores del Excel
+        with st.spinner("📊 Procesando archivo Excel..."):
+            valor_total, numero_registros, fecha_extraida = extract_excel_values_alma(uploaded_file)
+        
+        if valor_total is not None and numero_registros is not None:
+            
+            # Mostrar valores extraídos del Excel
+            st.markdown("### 📊 Valores Extraídos del Excel")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("TOTAL", f"${valor_total:,.0f}".replace(",", "."))
+            
+            with col2:
+                st.metric("NÚMERO DE REGISTROS", f"{numero_registros:,}".replace(",", "."))
+            
+            with col3:
+                if fecha_extraida:
+                    st.metric("FECHA", fecha_extraida)
+                else:
+                    st.warning("Fecha no detectada")
+            
+            st.markdown("---")
+            
+            # Extraer de Power BI automáticamente
+            if fecha_extraida:
+                ejecutar_extraccion = True
+            else:
+                st.warning("No se pudo extraer la fecha automáticamente del Excel")
+                ejecutar_extraccion = False
+            
+            if ejecutar_extraccion:
+                with st.spinner("🌐 Extrayendo datos de Power BI ALMA... Esto puede tomar 1-2 minutos"):
+                    resultados = extract_powerbi_data_alma(fecha_extraida)
+                    
+                    if resultados and (resultados.get('valor_texto') or resultados.get('cantidad_pasos_texto')):
+                        valor_powerbi_texto = resultados.get('valor_texto')
+                        cantidad_pasos_powerbi = resultados.get('cantidad_pasos_texto')
+                        
+                        st.markdown("---")
+                        
+                        # Mostrar valores de Power BI
+                        st.markdown("### 📊 Valores Extraídos de Power BI")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            if valor_powerbi_texto:
+                                st.metric("VALOR A PAGAR A COMERCIO (BI)", f"${valor_powerbi_texto}")
+                            else:
+                                st.warning("Valor no encontrado en Power BI")
+                        
+                        with col2:
+                            if cantidad_pasos_powerbi:
+                                st.metric("CANTIDAD DE PASOS (BI)", cantidad_pasos_powerbi)
+                            else:
+                                st.warning("Pasos no encontrados en Power BI")
+                        
+                        st.markdown("---")
+                        
+                        # Comparación de Valores
+                        if valor_powerbi_texto:
+                            st.markdown("### 💰 Validación: Valores")
+                            
+                            powerbi_valor, excel_valor, valor_formateado, coinciden_valor, dif_valor = compare_values_alma(
+                                valor_powerbi_texto, valor_total
+                            )
+                            
+                            if powerbi_valor is not None:
+                                col1, col2, col3 = st.columns([2, 2, 1])
+                                
+                                with col1:
+                                    st.metric("Power BI", f"${powerbi_valor:,.0f}".replace(",", "."))
+                                with col2:
+                                    st.metric("Excel", f"${excel_valor:,.0f}".replace(",", "."))
+                                with col3:
+                                    if coinciden_valor:
+                                        st.markdown("#### ✅")
+                                        st.success("COINCIDE")
+                                    else:
+                                        st.markdown("#### ❌")
+                                        st.error("DIFERENCIA")
+                                        st.caption(f"${dif_valor:,.0f}".replace(",", "."))
+                        
+                        # Comparación de Pasos
+                        if cantidad_pasos_powerbi:
+                            st.markdown("### 👣 Validación: Número de Registros/Pasos")
+                            
+                            powerbi_pasos, excel_pasos, pasos_formateado, coinciden_pasos, dif_pasos = compare_pasos_alma(
+                                cantidad_pasos_powerbi, numero_registros
+                            )
+                            
+                            col1, col2, col3 = st.columns([2, 2, 1])
+                            
+                            with col1:
+                                st.metric("Power BI", f"{powerbi_pasos:,}".replace(",", "."))
+                            with col2:
+                                st.metric("Excel", f"{excel_pasos:,}".replace(",", "."))
+                            with col3:
+                                if coinciden_pasos:
+                                    st.markdown("#### ✅")
+                                    st.success("COINCIDE")
+                                else:
+                                    st.markdown("#### ❌")
+                                    st.error("DIFERENCIA")
+                                    st.caption(f"{dif_pasos:,}")
+                        
+                        st.markdown("---")
+                        
+                        # Resultado Final
+                        st.markdown("### 📋 Resultado Final")
+                        
+                        if valor_powerbi_texto and cantidad_pasos_powerbi:
+                            if coinciden_valor and coinciden_pasos:
+                                st.success("🎉 VALIDACIÓN EXITOSA - Valores y pasos coinciden")
+                                st.balloons()
+                            elif coinciden_valor and not coinciden_pasos:
+                                st.warning("⚠️ VALIDACIÓN PARCIAL - Valores coinciden, pero hay diferencias en pasos")
+                            elif not coinciden_valor and coinciden_pasos:
+                                st.warning("⚠️ VALIDACIÓN PARCIAL - Pasos coinciden, pero hay diferencias en valores")
+                            else:
+                                st.error("❌ VALIDACIÓN FALLIDA - Existen diferencias en valores y pasos")
+                        else:
+                            st.warning("⚠️ VALIDACIÓN INCOMPLETA - No se pudieron extraer todos los datos de Power BI")
+                    
+                    elif resultados:
+                        st.error("Se accedió al reporte pero no se encontraron los valores específicos")
+                    else:
+                        st.error("No se pudieron extraer datos del reporte Power BI")
+        
+        else:
+            st.error("No se pudieron extraer valores del archivo Excel")
+            with st.expander("💡 Sugerencias para solucionar el problema"):
+                st.markdown("""
+                - Verifica que el Excel sea de ALMA y tenga una única hoja
+                - Asegúrate que la fila 2 contenga el texto con la fecha (ej: "REPORTE IP/REV 24 DE SEPTIEMBRE DEL 2025")
+                - El archivo debe contener las palabras "TOTAL" y "NUMERO DE REGISTROS" o que en sus últimas filas aparezcan el total y el conteo.
+                - Los valores pueden estar 1 o 2 columnas a la derecha de la etiqueta.
+                """)
+    
+    else:
+        st.info("📁 Por favor, carga un archivo Excel para comenzar la validación automática")
+
+    # Información de ayuda
+    st.markdown("---")
+    with st.expander("ℹ️ Instrucciones de Uso"):
+        st.markdown("""
+        **Proceso Automático:**
+        1. **Cargar Excel**: Archivo ALMA con una única hoja
+        2. **Extracción automática**: 
+           - Busca la fecha en la fila 2
+           - Busca "TOTAL" y trae el valor a la derecha (1-3 columnas)
+           - Busca "NUMERO DE REGISTROS" y trae el valor a la derecha (1-3 columnas)
+        3. **Extracción Power BI**: Navega automáticamente a la conciliación ALMA de la fecha extraída
+        4. **Comparación**: Compara automáticamente VALOR A PAGAR A COMERCIO y CANTIDAD DE PASOS
+        
+        **Mejoras en esta versión:**
+        - ✅ Extracción automática al cargar el archivo
+        - ✅ Sin necesidad de hacer clic en botones
+        - ✅ Proceso completamente automatizado
+        """)
+
+if __name__ == "__main__":
+    main()
+
+    # Footer
+    st.markdown("---")
+    st.markdown('<div class="footer">💻 Desarrollado por Angel Torres | 🚀 Powered by Streamlit | v1.4 ALMA Automático</div>', unsafe_allow_html=True), '').replace(' ', '')
             
             if '.' in cleaned and ',' in cleaned:
                 cleaned = cleaned.replace('.', '').replace(',', '.')
